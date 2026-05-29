@@ -47,7 +47,8 @@ public class UserEntity {
     private String styleEmbedding;
 
     @ElementCollection
-    @CollectionTable(name = "user_preferred_categories")
+    @CollectionTable(name = "user_preferred_categories", joinColumns = @JoinColumn(name = "user_id"))
+    @Column(name = "category")
     private List<String> preferredCategories = new ArrayList<>();
 
     @ManyToMany

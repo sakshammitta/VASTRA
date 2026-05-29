@@ -52,12 +52,14 @@ public class ClothingItemEntity {
     private String fashionClipEmbedding;
 
     @ElementCollection
-    @CollectionTable(name = "item_tags")
+    @CollectionTable(name = "item_tags", joinColumns = @JoinColumn(name = "item_id"))
+    @Column(name = "tag")
     private List<String> tags = new ArrayList<>();
 
     @ElementCollection
     @CollectionTable(name = "item_colors", joinColumns = @JoinColumn(name = "item_id"))
     @OrderColumn(name = "sort_order")
+    @Column(name = "hex_color")
     private List<String> colorPalette = new ArrayList<>();
 
     @CreationTimestamp

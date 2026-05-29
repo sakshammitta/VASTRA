@@ -42,12 +42,14 @@ public class PostEntity {
     private List<ShoppableTagEntity> shoppableTags = new ArrayList<>();
 
     @ElementCollection
-    @CollectionTable(name = "post_style_labels")
+    @CollectionTable(name = "post_style_labels", joinColumns = @JoinColumn(name = "post_id"))
+    @Column(name = "label")
     private List<String> styleLabels = new ArrayList<>();
 
     @ElementCollection
-    @CollectionTable(name = "post_dominant_colors")
+    @CollectionTable(name = "post_dominant_colors", joinColumns = @JoinColumn(name = "post_id"))
     @OrderColumn(name = "sort_order")
+    @Column(name = "hex_color")
     private List<String> dominantColors = new ArrayList<>();
 
     @CreationTimestamp
