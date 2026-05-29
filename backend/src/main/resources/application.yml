@@ -49,6 +49,15 @@ server:
   compression:
     enabled: true
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
 vastra:
   jwt:
     secret: ${JWT_SECRET:vastra-local-dev-secret-change-in-production}
