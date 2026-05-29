@@ -80,7 +80,7 @@ fun MainScreen(onLogout: () -> Unit) {
         drawerContent = {
             ProfileDrawerContent(
                 onNavigateToLogin = onLogout,
-                onClose = { kotlinx.coroutines.MainScope().launch { drawerState.close() } }
+                onClose = { scope.launch { drawerState.close() } }
             )
         }
     ) {
@@ -92,7 +92,7 @@ fun MainScreen(onLogout: () -> Unit) {
                     navigationIcon = {},
                     actions = {
                         IconButton(onClick = {
-                            kotlinx.coroutines.MainScope().launch { drawerState.open() }
+                            scope.launch { drawerState.open() }
                         }) {
                             Icon(
                                 Icons.Filled.AccountCircle,

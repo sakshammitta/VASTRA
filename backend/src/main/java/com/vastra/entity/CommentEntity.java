@@ -1,6 +1,7 @@
 package com.vastra.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -14,13 +15,16 @@ public class CommentEntity {
     private UUID id;
 
     @ManyToOne
+    @JoinColumn(name = "post_id")
     private PostEntity post;
 
     @ManyToOne
+    @JoinColumn(name = "author_id")
     private UserEntity author;
 
     private String text;
 
+    @CreationTimestamp
     private Instant createdAt;
 
     public CommentEntity() {

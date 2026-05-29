@@ -18,8 +18,8 @@ public interface PostRepository extends JpaRepository<PostEntity, UUID> {
 
     @Query("""
         SELECT p FROM PostEntity p
-        WHERE p.visibility = 'PUBLIC'
-           OR (p.visibility = 'FRIENDS_ONLY' AND p.author IN
+        WHERE p.visibility = com.vastra.entity.PostVisibility.PUBLIC
+           OR (p.visibility = com.vastra.entity.PostVisibility.FRIENDS_ONLY AND p.author IN
                (SELECT u FROM UserEntity u JOIN u.friends f WHERE f.id = :userId))
         ORDER BY p.createdAt DESC
     """)

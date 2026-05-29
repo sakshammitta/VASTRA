@@ -1,6 +1,8 @@
 package com.vastra.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -47,8 +49,10 @@ public class PostEntity {
     @OrderColumn(name = "sort_order")
     private List<String> dominantColors = new ArrayList<>();
 
+    @CreationTimestamp
     private Instant createdAt;
 
+    @UpdateTimestamp
     private Instant updatedAt;
 
     public PostEntity() {

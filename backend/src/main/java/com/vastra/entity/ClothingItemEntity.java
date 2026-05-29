@@ -1,6 +1,8 @@
 package com.vastra.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -56,8 +58,10 @@ public class ClothingItemEntity {
     @OrderColumn(name = "sort_order")
     private List<String> colorPalette = new ArrayList<>();
 
+    @CreationTimestamp
     private Instant addedAt;
 
+    @UpdateTimestamp
     private Instant updatedAt;
 
     public ClothingItemEntity() {
