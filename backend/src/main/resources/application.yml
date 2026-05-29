@@ -1,0 +1,70 @@
+spring:
+  application:
+    name: vastra-backend
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/vastra}
+    username: ${DATABASE_USER:vastra}
+    password: ${DATABASE_PASSWORD:vastra_dev}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+    show-sql: false
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 5000ms
+
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+
+  task:
+    execution:
+      pool:
+        core-size: 4
+        max-size: 16
+        queue-capacity: 100
+
+server:
+  port: 8080
+  compression:
+    enabled: true
+
+vastra:
+  jwt:
+    secret: ${JWT_SECRET:vastra-local-dev-secret-change-in-production}
+    expiration-ms: 86400000  # 24 hours
+
+  r2:
+    endpoint: ${R2_ENDPOINT:}
+    access-key: ${R2_ACCESS_KEY:}
+    secret-key: ${R2_SECRET_KEY:}
+    bucket: ${R2_BUCKET:vastra-media}
+    public-url: ${R2_PUBLIC_URL:}
+
+  cv-service:
+    base-url: ${CV_SERVICE_URL:http://localhost:8001}
+
+logging:
+  level:
+    com.vastra: INFO
+    org.springframework.security: WARN

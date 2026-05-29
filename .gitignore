@@ -1,0 +1,39 @@
+# Android
+android/.gradle/
+android/local.properties
+android/app/build/
+android/build/
+*.apk
+*.aab
+*.keystore
+
+# Spring Boot
+backend/build/
+backend/.gradle/
+backend/out/
+*.jar
+!gradle-wrapper.jar
+
+# Python / CV Service
+cv-service/__pycache__/
+cv-service/**/__pycache__/
+cv-service/.venv/
+cv-service/*.pth
+cv-service/*.pt
+*.pyc
+
+# Environment / secrets
+.env
+.env.local
+*.local.yml
+application-prod.yml
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.DS_Store
+
+# Docker volumes
+postgres_data/
+redis_data/
