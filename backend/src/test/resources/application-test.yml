@@ -1,0 +1,38 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:vastra_test;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    username: sa
+    password: ''
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: false
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+
+vastra:
+  jwt:
+    secret: test-secret-must-be-at-least-32-chars-long
+    expiration-ms: 86400000
+  r2:
+    endpoint: ''
+    access-key: ''
+    secret-key: ''
+    bucket: test-bucket
+    public-url: ''
+  cv-service:
+    base-url: http://localhost:8001
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
