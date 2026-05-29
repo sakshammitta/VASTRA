@@ -7,7 +7,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -32,27 +31,6 @@ public class SecurityConfig {
         this.jwtAuthFilter = jwtAuthFilter;
     }
 
-    /**
-     * Completely remove public paths from FilterChainProxy so no Spring
-     * Security filter (including ExceptionTranslationFilter) ever evaluates
-     * them. This is the only approach guaranteed to work regardless of
-     * AuthenticationEntryPoint or chain-selection matcher issues.
-     */
-    @Bean
-    public WebSecurityCustomizer webSecurityCustomizer() {
-        return web -> web.ignoring()
-                .requestMatchers(
-                        new AntPathRequestMatcher("/api/auth/register", "POST"),
-                        new AntPathRequestMatcher("/api/auth/login", "POST"),
-                        new AntPathRequestMatcher("/actuator/health", "GET")
-                );
-    }
-
-    /**
-     * Single chain — all non-ignored paths require a valid JWT.
-     * Returns 401 (not 403) for unauthenticated requests so clients
-     * can distinguish "not logged in" from "logged in but forbidden".
-     */
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
@@ -61,9 +39,17 @@ public class SecurityConfig {
                 .httpBasic(basic -> basic.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(
+                                new AntPathRequestMatcher("/api/auth/register", "POST"),
+                                new AntPathRequestMatcher("/api/auth/login", "POST"),
+                                new AntPathRequestMatcher("/actuator/health", "GET")
+                        ).permitAll()
+                        .anyRequest().authenticated()
+                )
                 .exceptionHandling(ex -> ex
-                        .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+                        .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
+                )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
