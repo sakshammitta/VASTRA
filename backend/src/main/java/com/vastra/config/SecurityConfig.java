@@ -12,6 +12,8 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -30,14 +32,20 @@ public class SecurityConfig {
     }
 
     /**
-     * Chain 1 — public paths. Owns /api/auth/** and /actuator/health
-     * completely; no authentication evaluated at all.
+     * Chain 1 — public paths only. Uses explicit AntPathRequestMatcher
+     * to avoid Spring Security 6 defaulting securityMatcher(String...) to
+     * MvcRequestMatcher, which fails to resolve wildcard patterns against
+     * the handler mapping at security evaluation time.
      */
     @Bean
     @Order(1)
     public SecurityFilterChain publicChain(HttpSecurity http) throws Exception {
         return http
-                .securityMatcher("/api/auth/**", "/actuator/health")
+                .securityMatcher(new OrRequestMatcher(
+                        new AntPathRequestMatcher("/api/auth/register"),
+                        new AntPathRequestMatcher("/api/auth/login"),
+                        new AntPathRequestMatcher("/actuator/health")
+                ))
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
