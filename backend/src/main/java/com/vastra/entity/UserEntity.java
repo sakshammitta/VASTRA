@@ -26,6 +26,7 @@ public class UserEntity {
     @Column(nullable = false)
     private String passwordHash;
 
+    @Column(name = "avatar_r2_key")
     private String avatarR2Key;
 
     private String bio;

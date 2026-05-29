@@ -21,6 +21,7 @@ public class PostEntity {
     @JoinColumn(name = "author_id")
     private UserEntity author;
 
+    @Column(name = "r2_image_key")
     private String r2ImageKey;
 
     private String caption;

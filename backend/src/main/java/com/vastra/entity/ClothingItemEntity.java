@@ -27,8 +27,10 @@ public class ClothingItemEntity {
     @Enumerated(EnumType.STRING)
     private OwnershipStatus ownershipStatus = OwnershipStatus.OWNED;
 
+    @Column(name = "r2_image_key")
     private String r2ImageKey;
 
+    @Column(name = "r2_thumbnail_key")
     private String r2ThumbnailKey;
 
     @Enumerated(EnumType.STRING)
