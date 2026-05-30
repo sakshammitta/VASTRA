@@ -4,6 +4,7 @@ import com.vastra.security.JwtAuthFilter;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -15,6 +16,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -32,22 +34,40 @@ public class SecurityConfig {
         this.jwtAuthFilter = jwtAuthFilter;
     }
 
+    /**
+     * Chain 1 (highest priority): public endpoints.
+     * Matched by path only — no JWT filter is added here at all, so these
+     * routes are never blocked regardless of the Authorization header.
+     */
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    @Order(1)
+    public SecurityFilterChain publicFilterChain(HttpSecurity http) throws Exception {
+        return http
+                .securityMatcher(new OrRequestMatcher(
+                        new AntPathRequestMatcher("/api/auth/register"),
+                        new AntPathRequestMatcher("/api/auth/login"),
+                        new AntPathRequestMatcher("/actuator/health")
+                ))
+                .csrf(csrf -> csrf.disable())
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+                .build();
+    }
+
+    /**
+     * Chain 2: all other endpoints require a valid JWT token.
+     */
+    @Bean
+    @Order(2)
+    public SecurityFilterChain securedFilterChain(HttpSecurity http) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .formLogin(form -> form.disable())
                 .httpBasic(basic -> basic.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(
-                                new AntPathRequestMatcher("/api/auth/register", "POST"),
-                                new AntPathRequestMatcher("/api/auth/login", "POST"),
-                                new AntPathRequestMatcher("/actuator/health", "GET")
-                        ).permitAll()
-                        .anyRequest().authenticated()
-                )
+                .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
                 )
@@ -55,8 +75,6 @@ public class SecurityConfig {
                 .build();
     }
 
-    // Prevent Spring Boot from registering JwtAuthFilter as a standalone servlet
-    // filter in addition to the one already placed inside the Security filter chain.
     @Bean
     public FilterRegistrationBean<JwtAuthFilter> jwtFilterRegistration(JwtAuthFilter filter) {
         var bean = new FilterRegistrationBean<>(filter);
