@@ -44,13 +44,13 @@ services:
       DATABASE_PASSWORD: vastra_dev
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      JWT_SECRET: local-dev-secret-change-in-production-must-be-32-chars-min
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-in-production-must-be-32-chars-min}
       CV_SERVICE_URL: http://cv-service:8001
-      R2_ENDPOINT: ""
-      R2_ACCESS_KEY: ""
-      R2_SECRET_KEY: ""
-      R2_BUCKET: vastra-media
-      R2_PUBLIC_URL: ""
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      R2_ACCESS_KEY: ${R2_ACCESS_KEY:-}
+      R2_SECRET_KEY: ${R2_SECRET_KEY:-}
+      R2_BUCKET: ${R2_BUCKET:-vastra-media}
+      R2_PUBLIC_URL: ${R2_PUBLIC_URL:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,10 +70,10 @@ services:
     ports:
       - "8001:8001"
     environment:
-      R2_ENDPOINT: ""
-      R2_ACCESS_KEY: ""
-      R2_SECRET_KEY: ""
-      R2_BUCKET: vastra-media
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      R2_ACCESS_KEY: ${R2_ACCESS_KEY:-}
+      R2_SECRET_KEY: ${R2_SECRET_KEY:-}
+      R2_BUCKET: ${R2_BUCKET:-vastra-media}
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
       interval: 10s
