@@ -48,6 +48,7 @@ public class ClothingItemEntity {
 
     private int styleMatchPercent = 0;
 
+    @Column(columnDefinition = "vector(512)")
     private String fashionClipEmbedding;
 
     @ElementCollection
