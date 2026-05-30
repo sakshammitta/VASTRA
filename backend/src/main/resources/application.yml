@@ -76,4 +76,4 @@ vastra:
 logging:
   level:
     com.vastra: INFO
-    org.springframework.security: TRACE
+    org.springframework.security: WARN

@@ -1,6 +1,7 @@
 package com.vastra.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.ColumnTransformer;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -36,6 +37,7 @@ public class PostEntity {
     private int saveCount = 0;
 
     @Column(columnDefinition = "vector(512)")
+    @ColumnTransformer(write = "CAST(? AS vector)")
     private String imageEmbedding;
 
     @OneToMany(mappedBy = "post", cascade = CascadeType.ALL, orphanRemoval = true)

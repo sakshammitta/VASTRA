@@ -1,6 +1,7 @@
 package com.vastra.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.ColumnTransformer;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -44,6 +45,7 @@ public class UserEntity {
     private int itemCount = 0;
 
     @Column(columnDefinition = "vector(512)")
+    @ColumnTransformer(write = "CAST(? AS vector)")
     private String styleEmbedding;
 
     @ElementCollection
