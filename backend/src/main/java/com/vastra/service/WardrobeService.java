@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class WardrobeService {
@@ -95,10 +96,16 @@ public class WardrobeService {
         }
 
         Map<String, Object> detected = detectedItems.get(req.itemIndex());
-        String cropKey     = (String) detected.get("crop_key");
-        String embedding   = (String) detected.get("embedding");
+        String cropKey = (String) detected.get("crop_key");
+
+        // CV service stores embedding as list[float] in Redis; convert to pgvector text format.
+        Object rawEmbedding = detected.get("embedding");
+        String embedding = toVectorString(rawEmbedding);
+
         List<String> colors = (List<String>) detected.getOrDefault("color_palette", List.of());
-        String cvCategory  = (String) detected.getOrDefault("category", "other");
+
+        // CV service category is already the uppercase enum name (e.g. "TOP", "BOTTOM").
+        String cvCategory = (String) detected.getOrDefault("category", "OTHER");
 
         var user = userRepo.findById(userId).orElseThrow();
         var item = new ClothingItemEntity();
@@ -123,19 +130,40 @@ public class WardrobeService {
         return ClothingItemDto.ClothingItemResponse.from(item, imageUrl, null);
     }
 
+    /** Convert a CV embedding (List<Double> from Redis JSON) to pgvector text format "[v1,v2,...]". */
+    @SuppressWarnings("unchecked")
+    private static String toVectorString(Object raw) {
+        if (raw == null) return null;
+        if (raw instanceof String s) return s;
+        if (raw instanceof List<?> list) {
+            return list.stream().map(Object::toString).collect(Collectors.joining(",", "[", "]"));
+        }
+        return raw.toString();
+    }
+
+    /**
+     * Map a CV category string to the ClothingCategory enum.
+     * The CV service stores the uppercase enum name directly ("TOP", "BOTTOM", etc.),
+     * but also handles lowercase sub_category labels as a fallback.
+     */
     private static ClothingCategory mapCvCategory(String cv) {
         if (cv == null) return ClothingCategory.OTHER;
+        // Try direct enum match first (CV service stores "TOP", "BOTTOM", etc.)
+        try {
+            return ClothingCategory.valueOf(cv.toUpperCase().trim());
+        } catch (IllegalArgumentException ignored) {}
+        // Fallback for sub_category label strings
         return switch (cv.toLowerCase().trim()) {
             case "shirt", "top", "blouse", "tshirt", "t-shirt", "tank", "polo" -> ClothingCategory.TOP;
             case "pants", "jeans", "shorts", "trousers", "skirt", "leggings"   -> ClothingCategory.BOTTOM;
             case "jacket", "coat", "hoodie", "sweater", "outerwear", "blazer"  -> ClothingCategory.OUTERWEAR;
             case "shoes", "sneakers", "boots", "sandals", "footwear", "heels"  -> ClothingCategory.FOOTWEAR;
-            case "bag", "backpack", "purse", "handbag", "tote"                  -> ClothingCategory.BAG;
-            case "dress", "gown", "jumpsuit"                                    -> ClothingCategory.DRESS;
-            case "suit"                                                          -> ClothingCategory.SUIT;
+            case "bag", "backpack", "purse", "handbag", "tote"                 -> ClothingCategory.BAG;
+            case "dress", "gown", "jumpsuit"                                   -> ClothingCategory.DRESS;
+            case "suit"                                                         -> ClothingCategory.SUIT;
             case "hat", "scarf", "belt", "accessory", "accessories",
-                 "watch", "jewelry", "sunglasses", "gloves"                     -> ClothingCategory.ACCESSORY;
-            default                                                              -> ClothingCategory.OTHER;
+                 "watch", "jewelry", "sunglasses", "gloves"                    -> ClothingCategory.ACCESSORY;
+            default                                                             -> ClothingCategory.OTHER;
         };
     }
 

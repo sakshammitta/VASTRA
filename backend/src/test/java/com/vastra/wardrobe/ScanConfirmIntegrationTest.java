@@ -71,7 +71,7 @@ class ScanConfirmIntegrationTest {
                     "crop_key", "item-crops/test-crop.jpg",
                     "category", "shirt",
                     "color_palette", List.of("#FFFFFF", "#000000"),
-                    "embedding", "[0.1,0.2,0.3]"
+                    "embedding", List.of(0.1, 0.2, 0.3)
                 )
             )
         );
@@ -116,7 +116,7 @@ class ScanConfirmIntegrationTest {
             "jobId", "job-one-item",
             "status", "COMPLETE",
             "detectedItems", List.of(
-                Map.of("crop_key", "k", "category", "shirt", "color_palette", List.of(), "embedding", "[0.1]")
+                Map.of("crop_key", "k", "category", "TOP", "color_palette", List.of(), "embedding", List.of(0.1))
             )
         );
         when(scanJobService.getJobStatus("job-one-item")).thenReturn(fakeJob);
@@ -137,9 +137,9 @@ class ScanConfirmIntegrationTest {
             "detectedItems", List.of(
                 Map.of(
                     "crop_key", "item-crops/wardrobe-test.jpg",
-                    "category", "jeans",
+                    "category", "BOTTOM",
                     "color_palette", List.of("#1A1A1A"),
-                    "embedding", "[0.5,0.6]"
+                    "embedding", List.of(0.5, 0.6)
                 )
             )
         );
