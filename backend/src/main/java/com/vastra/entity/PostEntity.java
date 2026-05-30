@@ -35,7 +35,6 @@ public class PostEntity {
 
     private int saveCount = 0;
 
-    @Column(columnDefinition = "vector(512)")
     private String imageEmbedding;
 
     @OneToMany(mappedBy = "post", cascade = CascadeType.ALL, orphanRemoval = true)

@@ -43,7 +43,6 @@ public class UserEntity {
 
     private int itemCount = 0;
 
-    @Column(columnDefinition = "vector(512)")
     private String styleEmbedding;
 
     @ElementCollection
