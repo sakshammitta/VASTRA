@@ -10,6 +10,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -71,6 +72,71 @@ public class WardrobeService {
         user.setItemCount(user.getItemCount() + 1);
         userRepo.save(user);
         return ClothingItemDto.ClothingItemResponse.from(item, null, null);
+    }
+
+    @Transactional
+    @SuppressWarnings("unchecked")
+    public ClothingItemDto.ClothingItemResponse confirmScanItem(
+            UUID userId, String jobId, ClothingItemDto.ConfirmScanItemRequest req) {
+
+        Map<String, Object> job = scanJobService.getJobStatus(jobId);
+        if (job == null) throw new java.util.NoSuchElementException("Scan job not found: " + jobId);
+
+        String status = (String) job.get("status");
+        if (!"COMPLETE".equals(status)) {
+            throw new IllegalArgumentException("Scan job is not complete yet (status=" + status + ")");
+        }
+
+        List<Map<String, Object>> detectedItems =
+                (List<Map<String, Object>>) job.getOrDefault("detectedItems", List.of());
+        if (req.itemIndex() < 0 || req.itemIndex() >= detectedItems.size()) {
+            throw new IllegalArgumentException(
+                    "itemIndex " + req.itemIndex() + " out of range (detected " + detectedItems.size() + " items)");
+        }
+
+        Map<String, Object> detected = detectedItems.get(req.itemIndex());
+        String cropKey     = (String) detected.get("crop_key");
+        String embedding   = (String) detected.get("embedding");
+        List<String> colors = (List<String>) detected.getOrDefault("color_palette", List.of());
+        String cvCategory  = (String) detected.getOrDefault("category", "other");
+
+        var user = userRepo.findById(userId).orElseThrow();
+        var item = new ClothingItemEntity();
+        item.setOwner(user);
+        item.setR2ImageKey(cropKey);
+        item.setFashionClipEmbedding(embedding);
+        item.setColorPalette(colors);
+        item.setOwnershipStatus(req.ownershipStatus() != null
+                ? OwnershipStatus.valueOf(req.ownershipStatus()) : OwnershipStatus.OWNED);
+        item.setCategory(req.category() != null
+                ? ClothingCategory.valueOf(req.category()) : mapCvCategory(cvCategory));
+        item.setSubCategory(req.subCategory() != null ? req.subCategory() : "");
+        item.setTags(req.tags() != null ? req.tags() : List.of());
+        item.setBrand(req.brand());
+        item.setPriceUsd(req.priceUsd());
+
+        item = itemRepo.save(item);
+        user.setItemCount(user.getItemCount() + 1);
+        userRepo.save(user);
+
+        String imageUrl = r2Service.getPresignedUrl(cropKey);
+        return ClothingItemDto.ClothingItemResponse.from(item, imageUrl, null);
+    }
+
+    private static ClothingCategory mapCvCategory(String cv) {
+        if (cv == null) return ClothingCategory.OTHER;
+        return switch (cv.toLowerCase().trim()) {
+            case "shirt", "top", "blouse", "tshirt", "t-shirt", "tank", "polo" -> ClothingCategory.TOP;
+            case "pants", "jeans", "shorts", "trousers", "skirt", "leggings"   -> ClothingCategory.BOTTOM;
+            case "jacket", "coat", "hoodie", "sweater", "outerwear", "blazer"  -> ClothingCategory.OUTERWEAR;
+            case "shoes", "sneakers", "boots", "sandals", "footwear", "heels"  -> ClothingCategory.FOOTWEAR;
+            case "bag", "backpack", "purse", "handbag", "tote"                  -> ClothingCategory.BAG;
+            case "dress", "gown", "jumpsuit"                                    -> ClothingCategory.DRESS;
+            case "suit"                                                          -> ClothingCategory.SUIT;
+            case "hat", "scarf", "belt", "accessory", "accessories",
+                 "watch", "jewelry", "sunglasses", "gloves"                     -> ClothingCategory.ACCESSORY;
+            default                                                              -> ClothingCategory.OTHER;
+        };
     }
 
     @Transactional

@@ -20,7 +20,9 @@ public class ClothingItemDto {
                 item.getOwner().getId().toString(), item.getOwnershipStatus().name(),
                 imageUrl, thumbnailUrl,
                 item.getCategory().name(), item.getSubCategory(),
-                item.getTags(), item.getColorPalette(), item.getBrand(),
+                item.getTags() != null ? List.copyOf(item.getTags()) : List.of(),
+                item.getColorPalette() != null ? List.copyOf(item.getColorPalette()) : List.of(),
+                item.getBrand(),
                 item.getPurchasePlatform(), item.getPurchaseUrl(), item.getPriceUsd(),
                 item.getStyleMatchPercent(),
                 item.getAddedAt() != null ? item.getAddedAt().toString() : null
@@ -31,5 +33,20 @@ public class ClothingItemDto {
     public record CreateItemRequest(
         String catalogId, String ownershipStatus, String category,
         String subCategory, List<String> tags, String brand, BigDecimal priceUsd
+    ) {}
+
+    /**
+     * Sent to POST /api/wardrobe/scan/{jobId}/confirm to save one detected item.
+     * itemIndex selects which entry in detectedItems to persist.
+     * All other fields are optional overrides; omitting category uses the CV-detected label.
+     */
+    public record ConfirmScanItemRequest(
+        int itemIndex,
+        String ownershipStatus,
+        String category,
+        String subCategory,
+        List<String> tags,
+        String brand,
+        BigDecimal priceUsd
     ) {}
 }

@@ -48,6 +48,14 @@ public class WardrobeController {
         return ResponseEntity.ok(job);
     }
 
+    @PostMapping("/scan/{jobId}/confirm")
+    public ResponseEntity<ClothingItemDto.ClothingItemResponse> confirmScanItem(
+            @PathVariable String jobId,
+            @RequestBody ClothingItemDto.ConfirmScanItemRequest req,
+            Authentication auth) {
+        return ResponseEntity.ok(wardrobeService.confirmScanItem((UUID) auth.getPrincipal(), jobId, req));
+    }
+
     @PostMapping("/items")
     public ResponseEntity<ClothingItemDto.ClothingItemResponse> createItem(
             @RequestBody ClothingItemDto.CreateItemRequest req,
