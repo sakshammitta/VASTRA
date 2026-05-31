@@ -14,6 +14,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.launch
 import com.vastra.ui.auth.LoginScreen
 import com.vastra.ui.auth.RegisterScreen
 import com.vastra.ui.feed.FeedScreen
