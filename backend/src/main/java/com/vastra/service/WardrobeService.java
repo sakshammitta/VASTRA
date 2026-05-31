@@ -117,12 +117,15 @@ public class WardrobeService {
                 ? OwnershipStatus.valueOf(req.ownershipStatus()) : OwnershipStatus.OWNED);
         item.setCategory(req.category() != null
                 ? ClothingCategory.valueOf(req.category()) : mapCvCategory(cvCategory));
-        item.setSubCategory(req.subCategory() != null ? req.subCategory() : "");
+        String cvSubCategory = (String) detected.getOrDefault("sub_category", "");
+        item.setSubCategory(req.subCategory() != null ? req.subCategory() : cvSubCategory);
         item.setTags(req.tags() != null ? req.tags() : List.of());
         item.setBrand(req.brand());
         item.setPriceUsd(req.priceUsd());
 
         item = itemRepo.save(item);
+        itemRepo.flush();
+        item = itemRepo.findById(item.getId()).orElseThrow();
         user.setItemCount(user.getItemCount() + 1);
         userRepo.save(user);
 
