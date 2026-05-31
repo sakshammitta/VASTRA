@@ -15,12 +15,17 @@ private val provider = GoogleFont.Provider(
     certificates = R.array.com_google_android_gms_fonts_certs
 )
 
-val PlayfairDisplay = FontFamily(
-    Font(googleFont = GoogleFont("Playfair Display"), fontProvider = provider, weight = FontWeight.Normal),
-    Font(googleFont = GoogleFont("Playfair Display"), fontProvider = provider, weight = FontWeight.Medium),
-    Font(googleFont = GoogleFont("Playfair Display"), fontProvider = provider, weight = FontWeight.SemiBold),
-    Font(googleFont = GoogleFont("Playfair Display"), fontProvider = provider, weight = FontWeight.Bold),
+// Cormorant Garamond — the Lovable serif. Used Light (300) for an editorial,
+// luxury feel across headings and captions.
+val CormorantGaramond = FontFamily(
+    Font(googleFont = GoogleFont("Cormorant Garamond"), fontProvider = provider, weight = FontWeight.Light),
+    Font(googleFont = GoogleFont("Cormorant Garamond"), fontProvider = provider, weight = FontWeight.Normal),
+    Font(googleFont = GoogleFont("Cormorant Garamond"), fontProvider = provider, weight = FontWeight.Medium),
+    Font(googleFont = GoogleFont("Cormorant Garamond"), fontProvider = provider, weight = FontWeight.SemiBold),
 )
+
+// Kept as an alias so any lingering references compile.
+val PlayfairDisplay = CormorantGaramond
 
 val Inter = FontFamily(
     Font(googleFont = GoogleFont("Inter"), fontProvider = provider, weight = FontWeight.Normal),
@@ -30,12 +35,12 @@ val Inter = FontFamily(
 )
 
 val VastraTypography = Typography(
-    displayLarge = TextStyle(fontFamily = PlayfairDisplay, fontWeight = FontWeight.Bold, fontSize = 57.sp, lineHeight = 64.sp),
-    displayMedium = TextStyle(fontFamily = PlayfairDisplay, fontWeight = FontWeight.Bold, fontSize = 45.sp, lineHeight = 52.sp),
-    displaySmall = TextStyle(fontFamily = PlayfairDisplay, fontWeight = FontWeight.SemiBold, fontSize = 36.sp, lineHeight = 44.sp),
-    headlineLarge = TextStyle(fontFamily = PlayfairDisplay, fontWeight = FontWeight.SemiBold, fontSize = 32.sp, lineHeight = 40.sp),
-    headlineMedium = TextStyle(fontFamily = PlayfairDisplay, fontWeight = FontWeight.SemiBold, fontSize = 28.sp, lineHeight = 36.sp),
-    headlineSmall = TextStyle(fontFamily = PlayfairDisplay, fontWeight = FontWeight.Medium, fontSize = 24.sp, lineHeight = 32.sp),
+    displayLarge = TextStyle(fontFamily = CormorantGaramond, fontWeight = FontWeight.Light, fontSize = 57.sp, lineHeight = 60.sp),
+    displayMedium = TextStyle(fontFamily = CormorantGaramond, fontWeight = FontWeight.Light, fontSize = 45.sp, lineHeight = 48.sp),
+    displaySmall = TextStyle(fontFamily = CormorantGaramond, fontWeight = FontWeight.Light, fontSize = 36.sp, lineHeight = 40.sp),
+    headlineLarge = TextStyle(fontFamily = CormorantGaramond, fontWeight = FontWeight.Light, fontSize = 32.sp, lineHeight = 36.sp),
+    headlineMedium = TextStyle(fontFamily = CormorantGaramond, fontWeight = FontWeight.Light, fontSize = 28.sp, lineHeight = 32.sp),
+    headlineSmall = TextStyle(fontFamily = CormorantGaramond, fontWeight = FontWeight.Normal, fontSize = 24.sp, lineHeight = 28.sp),
     titleLarge = TextStyle(fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, lineHeight = 28.sp),
     titleMedium = TextStyle(fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 24.sp),
     titleSmall = TextStyle(fontFamily = Inter, fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp),

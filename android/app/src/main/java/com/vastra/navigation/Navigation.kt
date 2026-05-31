@@ -11,8 +11,7 @@ sealed class Destination(val route: String) {
     object Register : Destination("register")
     object Feed : Destination("feed")
     object Wardrobe : Destination("wardrobe")
-    object Discover : Destination("discover")
-    object Saved : Destination("saved")
+    object Scan : Destination("scan")
     object Profile : Destination("profile/{username}") {
         fun createRoute(username: String) = "profile/$username"
     }
@@ -31,9 +30,9 @@ data class BottomNavItem(
     val label: String
 )
 
+// MVP bottom nav: Feed + Wardrobe only. Scan is a central CTA (rendered
+// separately), and Profile opens from the top-left drawer (X/Twitter style).
 val bottomNavItems = listOf(
     BottomNavItem(Destination.Feed, Icons.Filled.Home, Icons.Outlined.Home, "Feed"),
     BottomNavItem(Destination.Wardrobe, Icons.Filled.Checkroom, Icons.Outlined.Checkroom, "Wardrobe"),
-    BottomNavItem(Destination.Discover, Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome, "Discover"),
-    BottomNavItem(Destination.Saved, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder, "Saved"),
 )
