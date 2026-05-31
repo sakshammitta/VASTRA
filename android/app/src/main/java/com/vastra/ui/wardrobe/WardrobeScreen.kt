@@ -2,9 +2,6 @@ package com.vastra.ui.wardrobe
 
 import android.content.Context
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -14,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,10 +19,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.vastra.data.model.ClothingCategory
@@ -35,50 +34,161 @@ import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WardrobeScreen(viewModel: WardrobeViewModel = hiltViewModel()) {
+fun WardrobeScreen(
+    onNavigateToScan: () -> Unit,
+    viewModel: WardrobeViewModel = hiltViewModel()
+) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
-
-    // Gallery picker — returns a URI, copies to temp file, kicks off scan
-    val galleryLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.scanImage(uri.toTempFile(context)) }
-    }
 
     Box(modifier = Modifier.fillMaxSize().background(VastraCream)) {
         Column(modifier = Modifier.fillMaxSize()) {
+
+            // ── Header ──────────────────────────────────────────────────────
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 20.dp, bottom = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
                 Column {
-                    Text("My Wardrobe", style = MaterialTheme.typography.headlineMedium, color = VastraCharcoal)
-                    Text("${uiState.items.size} items", style = MaterialTheme.typography.bodySmall, color = VastraSubtext)
+                    Text(
+                        "YOUR CLOSET",
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                        color = VastraMutedText
+                    )
+                    Text(
+                        "Wardrobe",
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = VastraInk
+                    )
                 }
-                if (uiState.activeScanJobs.isNotEmpty()) ScanningIndicator()
+                OutlinedButton(
+                    onClick = onNavigateToScan,
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.dp, VastraBorderColor),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = VastraInk),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Scan", style = MaterialTheme.typography.labelMedium)
+                }
             }
 
+            // ── Stat cards ──────────────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                StatCard("Items", uiState.items.size.toString(), Modifier.weight(1f))
+                StatCard("Looks", "—", Modifier.weight(1f))
+                StatCard("Saved", "—", Modifier.weight(1f))
+            }
+
+            // ── Wardrobe Insights (disabled) ────────────────────────────────
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = VastraCard,
+                border = BorderStroke(1.dp, VastraBorderColor)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(Icons.Outlined.BarChart, null, tint = VastraMutedText, modifier = Modifier.size(20.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Wardrobe Insights",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = VastraInk
+                        )
+                        Text(
+                            "Add more items to unlock analytics",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = VastraMutedText
+                        )
+                    }
+                    Surface(color = VastraSand, shape = RoundedCornerShape(8.dp)) {
+                        Text(
+                            "Soon",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = VastraMutedText
+                        )
+                    }
+                }
+            }
+
+            // ── Style Advisor (dark panel, disabled) ────────────────────────
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = VastraInk
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(Icons.Outlined.AutoAwesome, null, tint = VastraCream.copy(alpha = 0.6f), modifier = Modifier.size(20.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Style Advisor",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = VastraCream
+                        )
+                        Text(
+                            "AI outfit recommendations coming soon",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = VastraCream.copy(alpha = 0.5f)
+                        )
+                    }
+                    Surface(color = Color.White.copy(alpha = 0.12f), shape = RoundedCornerShape(8.dp)) {
+                        Text(
+                            "Soon",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = VastraCream.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── Filter pills ────────────────────────────────────────────────
             CategoryFilterRow(
                 selectedCategory = uiState.selectedCategory,
                 onCategorySelected = { viewModel.selectCategory(it) }
             )
 
+            Spacer(Modifier.height(4.dp))
+
+            // ── Grid ────────────────────────────────────────────────────────
             if (uiState.isLoading) {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize()
                 ) { items(6) { WardrobeItemSkeleton() } }
             } else if (uiState.items.isEmpty()) {
-                EmptyWardrobeState(onAddItem = { viewModel.showAddSheet() })
+                EmptyWardrobeState(onScan = onNavigateToScan)
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize()
@@ -90,14 +200,7 @@ fun WardrobeScreen(viewModel: WardrobeViewModel = hiltViewModel()) {
             }
         }
 
-        FloatingActionButton(
-            onClick = { viewModel.showAddSheet() },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
-            containerColor = VastraCharcoal,
-            contentColor = VastraCream
-        ) { Icon(Icons.Filled.Add, "Add Item") }
-
-        // Error snackbar
+        // ── Error snackbar ───────────────────────────────────────────────────
         uiState.error?.let { msg ->
             Snackbar(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
@@ -105,18 +208,7 @@ fun WardrobeScreen(viewModel: WardrobeViewModel = hiltViewModel()) {
             ) { Text(msg) }
         }
 
-        if (uiState.showAddSheet) {
-            AddItemBottomSheet(
-                onDismiss = { viewModel.hideAddSheet() },
-                onPickFromGallery = {
-                    viewModel.hideAddSheet()
-                    galleryLauncher.launch("image/*")
-                },
-                onManualEntry = { viewModel.hideAddSheet() }
-            )
-        }
-
-        // Detected-items selection sheet — shown when a scan completes
+        // ── Scan result confirmation sheet ───────────────────────────────────
         uiState.pendingConfirmJob?.let { job ->
             ScanResultSelectionSheet(
                 detectedItems = job.detectedItems,
@@ -130,7 +222,37 @@ fun WardrobeScreen(viewModel: WardrobeViewModel = hiltViewModel()) {
     }
 }
 
-// ─── Scan result selection bottom sheet ─────────────────────────────────────
+// ─── Stat card ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = VastraCard,
+        border = BorderStroke(1.dp, VastraBorderColor)
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 14.dp, horizontal = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                value,
+                style = MaterialTheme.typography.headlineSmall,
+                color = VastraInk,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = VastraMutedText,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+// ─── Scan result selection bottom sheet ──────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -144,7 +266,7 @@ fun ScanResultSelectionSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = VastraSurface,
+        containerColor = VastraCard,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
         Column(
@@ -159,15 +281,15 @@ fun ScanResultSelectionSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("Items Detected", style = MaterialTheme.typography.titleLarge, color = VastraCharcoal)
+                    Text("Items Detected", style = MaterialTheme.typography.titleLarge, color = VastraInk)
                     Text(
                         "Select the items to add to your wardrobe",
                         style = MaterialTheme.typography.bodySmall,
-                        color = VastraSubtext
+                        color = VastraMutedText
                     )
                 }
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Filled.Close, "Dismiss", tint = VastraSubtext)
+                    Icon(Icons.Filled.Close, "Dismiss", tint = VastraMutedText)
                 }
             }
 
@@ -180,7 +302,7 @@ fun ScanResultSelectionSheet(
                     onToggle = { onToggle(index) }
                 )
                 if (index < detectedItems.lastIndex) {
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = VastraOutline)
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = VastraBorderColor)
                 }
             }
 
@@ -192,14 +314,10 @@ fun ScanResultSelectionSheet(
                 enabled = count > 0 && !isConfirming,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = VastraCharcoal)
+                colors = ButtonDefaults.buttonColors(containerColor = VastraInk)
             ) {
                 if (isConfirming) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = VastraCream,
-                        strokeWidth = 2.dp
-                    )
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = VastraCream, strokeWidth = 2.dp)
                 } else {
                     Text(
                         if (count == 0) "Select items to add"
@@ -227,12 +345,11 @@ fun DetectedItemRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Crop image preview
         Box(
             modifier = Modifier
                 .size(72.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(VastraSurfaceVariant)
+                .background(VastraMuted)
         ) {
             if (item.cropUrl != null) {
                 AsyncImage(
@@ -246,23 +363,18 @@ fun DetectedItemRow(
                     Icons.Filled.Checkroom,
                     contentDescription = null,
                     modifier = Modifier.align(Alignment.Center).size(32.dp),
-                    tint = VastraOutline
+                    tint = VastraBorderColor
                 )
             }
         }
 
-        // Labels and color palette
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                item.category.label,
-                style = MaterialTheme.typography.labelMedium,
-                color = VastraSubtext
-            )
+            Text(item.category.label, style = MaterialTheme.typography.labelMedium, color = VastraMutedText)
             Text(
                 item.subCategory.ifEmpty { item.category.label },
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
-                color = VastraCharcoal,
+                color = VastraInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -274,7 +386,7 @@ fun DetectedItemRow(
                                 .size(14.dp)
                                 .clip(CircleShape)
                                 .background(parseHexColor(hex))
-                                .border(0.5.dp, VastraOutline, CircleShape)
+                                .border(0.5.dp, VastraBorderColor, CircleShape)
                         )
                     }
                 }
@@ -284,21 +396,21 @@ fun DetectedItemRow(
         Checkbox(
             checked = isSelected,
             onCheckedChange = { onToggle() },
-            colors = CheckboxDefaults.colors(
-                checkedColor = VastraCharcoal,
-                uncheckedColor = VastraOutline
-            )
+            colors = CheckboxDefaults.colors(checkedColor = VastraInk, uncheckedColor = VastraBorderColor)
         )
     }
 }
 
-// ─── Wardrobe grid components ────────────────────────────────────────────────
+// ─── Wardrobe grid components ─────────────────────────────────────────────────
 
 @Composable
 fun CategoryFilterRow(selectedCategory: ClothingCategory?, onCategorySelected: (ClothingCategory?) -> Unit) {
     val categories = listOf(null) + ClothingCategory.values().toList()
     Row(
-        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         categories.forEach { category ->
@@ -308,14 +420,16 @@ fun CategoryFilterRow(selectedCategory: ClothingCategory?, onCategorySelected: (
                 onClick = { onCategorySelected(category) },
                 label = { Text(category?.label ?: "All", style = MaterialTheme.typography.labelMedium) },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = VastraCharcoal,
+                    selectedContainerColor = VastraInk,
                     selectedLabelColor = VastraCream,
-                    containerColor = VastraSurface,
-                    labelColor = VastraCharcoal
+                    containerColor = VastraCard,
+                    labelColor = VastraInk
                 ),
                 border = FilterChipDefaults.filterChipBorder(
-                    enabled = true, selected = isSelected,
-                    borderColor = VastraOutline, selectedBorderColor = VastraCharcoal
+                    enabled = true,
+                    selected = isSelected,
+                    borderColor = VastraBorderColor,
+                    selectedBorderColor = VastraInk
                 )
             )
         }
@@ -329,8 +443,9 @@ fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = VastraSurface),
-        elevation = CardDefaults.cardElevation(2.dp)
+        colors = CardDefaults.cardColors(containerColor = VastraCard),
+        elevation = CardDefaults.cardElevation(0.dp),
+        border = BorderStroke(1.dp, VastraBorderColor)
     ) {
         Box {
             Column {
@@ -343,7 +458,7 @@ fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit) {
                     )
                     Surface(
                         modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
-                        color = Color.Black.copy(alpha = 0.6f),
+                        color = Color.Black.copy(alpha = 0.55f),
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
@@ -355,12 +470,12 @@ fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit) {
                     }
                 }
                 Column(modifier = Modifier.padding(10.dp)) {
-                    item.brand?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = VastraSubtext, maxLines = 1) }
+                    item.brand?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = VastraMutedText, maxLines = 1) }
                     Text(
                         item.subCategory.ifEmpty { item.category.label },
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
-                        color = VastraCharcoal,
+                        color = VastraInk,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -370,7 +485,7 @@ fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit) {
                                 Box(
                                     modifier = Modifier.size(12.dp).clip(CircleShape)
                                         .background(parseHexColor(hex))
-                                        .border(0.5.dp, VastraOutline, CircleShape)
+                                        .border(0.5.dp, VastraBorderColor, CircleShape)
                                 )
                             }
                         }
@@ -391,87 +506,30 @@ fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit) {
 }
 
 @Composable
-fun ScanningIndicator() {
-    val infiniteTransition = rememberInfiniteTransition(label = "scan")
-    val alpha by infiniteTransition.animateFloat(
-        0.4f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "scan"
-    )
-    Surface(color = VastraGold.copy(alpha = alpha), shape = RoundedCornerShape(12.dp)) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            CircularProgressIndicator(modifier = Modifier.size(12.dp), color = Color.White, strokeWidth = 2.dp)
-            Text("Scanning…", color = Color.White, style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AddItemBottomSheet(
-    onDismiss: () -> Unit,
-    onPickFromGallery: () -> Unit,
-    onManualEntry: () -> Unit
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = VastraSurface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
-            Text(
-                "Add to Wardrobe",
-                style = MaterialTheme.typography.titleLarge,
-                color = VastraCharcoal,
-                modifier = Modifier.padding(bottom = 24.dp)
-            )
-            listOf(
-                Triple(Icons.Filled.PhotoLibrary, "Choose from Gallery", onPickFromGallery),
-                Triple(Icons.Filled.Edit, "Enter Manually", onManualEntry),
-            ).forEach { (icon, label, action) ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = action)
-                        .padding(vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Icon(icon, null, tint = VastraCharcoal, modifier = Modifier.size(22.dp))
-                    Text(label, style = MaterialTheme.typography.bodyLarge, color = VastraCharcoal)
-                }
-            }
-            // Camera — coming soon
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Icon(Icons.Filled.CameraAlt, null, tint = VastraOutline, modifier = Modifier.size(22.dp))
-                Text("Scan with Camera", style = MaterialTheme.typography.bodyLarge, color = VastraOutline)
-                Spacer(Modifier.weight(1f))
-                Surface(color = VastraGoldLight, shape = RoundedCornerShape(8.dp)) {
-                    Text("Soon", modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        style = MaterialTheme.typography.labelSmall, color = VastraGoldDark)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun EmptyWardrobeState(onAddItem: () -> Unit) {
+fun EmptyWardrobeState(onScan: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Icon(Icons.Filled.Checkroom, null, modifier = Modifier.size(72.dp), tint = VastraOutline)
-            Text("Your wardrobe is empty", style = MaterialTheme.typography.titleMedium, color = VastraCharcoal)
-            Text("Add your first item to get started", style = MaterialTheme.typography.bodyMedium, color = VastraSubtext)
-            Button(onClick = onAddItem, colors = ButtonDefaults.buttonColors(containerColor = VastraCharcoal)) {
-                Icon(Icons.Filled.Add, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Add Item")
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(40.dp)
+        ) {
+            Icon(Icons.Outlined.Checkroom, null, modifier = Modifier.size(64.dp), tint = VastraBorderColor)
+            Text("Your closet is empty", style = MaterialTheme.typography.titleMedium, color = VastraInk)
+            Text(
+                "Scan your first piece to start building your digital wardrobe",
+                style = MaterialTheme.typography.bodyMedium,
+                color = VastraMutedText,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(4.dp))
+            Button(
+                onClick = onScan,
+                colors = ButtonDefaults.buttonColors(containerColor = VastraInk),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Icon(Icons.Filled.Add, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Scan a piece")
             }
         }
     }
@@ -479,14 +537,24 @@ fun EmptyWardrobeState(onAddItem: () -> Unit) {
 
 @Composable
 fun WardrobeItemSkeleton() {
-    val shimmer = rememberInfiniteTransition(label = "shimmer")
-    val alpha by shimmer.animateFloat(0.3f, 0.7f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "shimmer")
-    Card(shape = RoundedCornerShape(16.dp), elevation = CardDefaults.cardElevation(0.dp)) {
+    val alpha by rememberInfiniteTransition(label = "shimmer").animateFloat(
+        0.3f, 0.7f,
+        androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(900),
+            androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "shimmer"
+    )
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(0.dp),
+        border = BorderStroke(1.dp, VastraBorderColor)
+    ) {
         Column {
-            Box(Modifier.fillMaxWidth().aspectRatio(0.75f).background(VastraSurfaceVariant.copy(alpha = alpha)))
+            Box(Modifier.fillMaxWidth().aspectRatio(0.75f).background(VastraMuted.copy(alpha = alpha)))
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box(Modifier.width(60.dp).height(10.dp).clip(RoundedCornerShape(5.dp)).background(VastraSurfaceVariant.copy(alpha = alpha)))
-                Box(Modifier.width(100.dp).height(12.dp).clip(RoundedCornerShape(5.dp)).background(VastraSurfaceVariant.copy(alpha = alpha)))
+                Box(Modifier.width(60.dp).height(10.dp).clip(RoundedCornerShape(5.dp)).background(VastraMuted.copy(alpha = alpha)))
+                Box(Modifier.width(100.dp).height(12.dp).clip(RoundedCornerShape(5.dp)).background(VastraMuted.copy(alpha = alpha)))
             }
         }
     }
@@ -497,7 +565,7 @@ private fun parseHexColor(hex: String): Color = try {
 } catch (e: Exception) { Color.LightGray }
 
 /** Copy a content URI to a temporary file so it can be sent as a multipart body. */
-private fun Uri.toTempFile(context: Context): File {
+fun Uri.toTempFile(context: Context): File {
     val input = context.contentResolver.openInputStream(this)!!
     val suffix = when (context.contentResolver.getType(this)) {
         "image/png"  -> ".png"

@@ -18,7 +18,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -29,6 +28,7 @@ import com.vastra.ui.auth.LoginScreen
 import com.vastra.ui.auth.RegisterScreen
 import com.vastra.ui.feed.FeedScreen
 import com.vastra.ui.profile.ProfileDrawerContent
+import com.vastra.ui.scan.ScanScreen
 import com.vastra.ui.wardrobe.WardrobeScreen
 import com.vastra.ui.theme.VastraCream
 import com.vastra.ui.theme.VastraInk
@@ -84,6 +84,9 @@ fun MainScreen(onLogout: () -> Unit) {
     val navBackStack by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStack?.destination
 
+    // Hide the bottom bar when on the Scan screen
+    val showBottomBar = currentDestination?.route != Destination.Scan.route
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -96,43 +99,41 @@ fun MainScreen(onLogout: () -> Unit) {
         Scaffold(
             containerColor = VastraCream,
             topBar = {
-                // Top-left profile icon opens the drawer (X/Twitter style).
-                TopAppBar(
-                    title = {},
-                    navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(
-                                Icons.Filled.AccountCircle,
-                                contentDescription = "Profile",
-                                modifier = Modifier.size(28.dp),
-                                tint = VastraInk
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = VastraCream)
-                )
+                if (showBottomBar) {
+                    TopAppBar(
+                        title = {},
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(
+                                    Icons.Filled.AccountCircle,
+                                    contentDescription = "Profile",
+                                    modifier = Modifier.size(28.dp),
+                                    tint = VastraInk
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = VastraCream)
+                    )
+                }
             },
             bottomBar = {
-                VastraBottomBar(
-                    currentRoute = currentDestination?.route,
-                    onNavigate = { route ->
-                        navController.navigate(route) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
+                if (showBottomBar) {
+                    VastraBottomBar(
+                        currentRoute = currentDestination?.route,
+                        onNavigate = { route ->
+                            navController.navigate(route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        onScan = {
+                            navController.navigate(Destination.Scan.route) {
+                                launchSingleTop = true
+                            }
                         }
-                    },
-                    // Phase 1: the central Scan action routes to Wardrobe, where the
-                    // existing gallery-scan flow lives. Phase 2 introduces a dedicated
-                    // Scan presentation.
-                    onScan = {
-                        navController.navigate(Destination.Wardrobe.route) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    }
-                )
+                    )
+                }
             }
         ) { paddingValues ->
             NavHost(
@@ -141,15 +142,25 @@ fun MainScreen(onLogout: () -> Unit) {
                 modifier = Modifier.padding(paddingValues)
             ) {
                 composable(Destination.Feed.route) { FeedScreen() }
-                composable(Destination.Wardrobe.route) { WardrobeScreen() }
+                composable(Destination.Wardrobe.route) {
+                    WardrobeScreen(
+                        onNavigateToScan = {
+                            navController.navigate(Destination.Scan.route) {
+                                launchSingleTop = true
+                            }
+                        }
+                    )
+                }
+                composable(Destination.Scan.route) {
+                    ScanScreen(onBack = { navController.popBackStack() })
+                }
             }
         }
     }
 }
 
 /**
- * Glass pill bottom bar matching the Lovable prototype: Feed and Wardrobe tabs
- * flanking a raised central ink Scan button.
+ * Glass pill bottom bar: Feed | raised ink Scan button | Wardrobe
  */
 @Composable
 private fun VastraBottomBar(
