@@ -64,6 +64,12 @@ interface VastraApiService {
     @DELETE("api/wardrobe/items/{id}")
     suspend fun deleteItem(@Path("id") itemId: String): Response<Unit>
 
+    @POST("api/wardrobe/scan/{jobId}/confirm")
+    suspend fun confirmScanItem(
+        @Path("jobId") jobId: String,
+        @Body request: ConfirmScanItemRequest
+    ): Response<ClothingItem>
+
     @GET("api/recommendations/swipe")
     suspend fun getNextSwipeCard(): Response<ClothingItem>
 
@@ -96,6 +102,15 @@ data class CreateItemRequest(
     val tags: List<String>,
     val brand: String?,
     val priceUsd: Float?
+)
+data class ConfirmScanItemRequest(
+    val itemIndex: Int,
+    val ownershipStatus: String = "OWNED",
+    val category: String? = null,
+    val subCategory: String? = null,
+    val brand: String? = null,
+    val tags: List<String>? = null,
+    val priceUsd: Float? = null
 )
 data class SwipeRequest(val itemId: String, val direction: SwipeDirection)
 data class AddCommentRequest(val text: String)

@@ -1,6 +1,7 @@
 package com.vastra.controller;
 
 import com.vastra.dto.ClothingItemDto;
+import com.vastra.service.R2Service;
 import com.vastra.service.ScanJobService;
 import com.vastra.service.WardrobeService;
 import org.springframework.http.ResponseEntity;
@@ -9,6 +10,8 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -19,10 +22,12 @@ public class WardrobeController {
 
     private final WardrobeService wardrobeService;
     private final ScanJobService scanJobService;
+    private final R2Service r2Service;
 
-    public WardrobeController(WardrobeService wardrobeService, ScanJobService scanJobService) {
+    public WardrobeController(WardrobeService wardrobeService, ScanJobService scanJobService, R2Service r2Service) {
         this.wardrobeService = wardrobeService;
         this.scanJobService = scanJobService;
+        this.r2Service = r2Service;
     }
 
     @GetMapping
@@ -41,11 +46,25 @@ public class WardrobeController {
         return ResponseEntity.ok(Map.of("jobId", jobId, "status", "QUEUED"));
     }
 
+    @SuppressWarnings("unchecked")
     @GetMapping("/scan/{jobId}")
     public ResponseEntity<?> getScanStatus(@PathVariable String jobId) {
         Map<String, Object> job = scanJobService.getJobStatus(jobId);
         if (job == null) return ResponseEntity.notFound().build();
-        return ResponseEntity.ok(job);
+
+        // Enrich each detected item with a cropUrl so clients can display the crop image.
+        List<Map<String, Object>> rawItems =
+                (List<Map<String, Object>>) job.getOrDefault("detectedItems", List.of());
+        List<Map<String, Object>> enriched = new ArrayList<>(rawItems.size());
+        for (Map<String, Object> item : rawItems) {
+            Map<String, Object> copy = new HashMap<>(item);
+            String cropKey = (String) item.get("crop_key");
+            copy.put("cropUrl", r2Service.getPresignedUrl(cropKey));
+            enriched.add(copy);
+        }
+        Map<String, Object> response = new HashMap<>(job);
+        response.put("detectedItems", enriched);
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/scan/{jobId}/confirm")

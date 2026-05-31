@@ -92,10 +92,19 @@ data class StyleMetadata(
 
 enum class PostVisibility { PUBLIC, FRIENDS_ONLY, PRIVATE }
 
+/** Raw item returned by GET /api/wardrobe/scan/{jobId} — not yet saved to wardrobe. */
+data class DetectedScanItem(
+    @com.google.gson.annotations.SerializedName("crop_key")   val cropKey: String?,
+    @com.google.gson.annotations.SerializedName("cropUrl")    val cropUrl: String?,
+    @com.google.gson.annotations.SerializedName("category")   val category: ClothingCategory = ClothingCategory.OTHER,
+    @com.google.gson.annotations.SerializedName("sub_category") val subCategory: String = "",
+    @com.google.gson.annotations.SerializedName("color_palette") val colorPalette: List<String> = emptyList()
+)
+
 data class ScanJob(
     val jobId: String,
     val status: ScanStatus,
-    val detectedItems: List<ClothingItem> = emptyList(),
+    val detectedItems: List<DetectedScanItem> = emptyList(),
     val errorMessage: String? = null
 )
 

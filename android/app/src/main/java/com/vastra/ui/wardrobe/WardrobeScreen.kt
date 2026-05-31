@@ -1,5 +1,9 @@
 package com.vastra.ui.wardrobe
 
+import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -17,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -24,13 +29,22 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.vastra.data.model.ClothingCategory
 import com.vastra.data.model.ClothingItem
-import com.vastra.data.model.ScanStatus
+import com.vastra.data.model.DetectedScanItem
 import com.vastra.ui.theme.*
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WardrobeScreen(viewModel: WardrobeViewModel = hiltViewModel()) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+
+    // Gallery picker — returns a URI, copies to temp file, kicks off scan
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.scanImage(uri.toTempFile(context)) }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(VastraCream)) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -43,9 +57,7 @@ fun WardrobeScreen(viewModel: WardrobeViewModel = hiltViewModel()) {
                     Text("My Wardrobe", style = MaterialTheme.typography.headlineMedium, color = VastraCharcoal)
                     Text("${uiState.items.size} items", style = MaterialTheme.typography.bodySmall, color = VastraSubtext)
                 }
-                if (uiState.activeScanJobs.isNotEmpty()) {
-                    ScanningIndicator()
-                }
+                if (uiState.activeScanJobs.isNotEmpty()) ScanningIndicator()
             }
 
             CategoryFilterRow(
@@ -60,9 +72,7 @@ fun WardrobeScreen(viewModel: WardrobeViewModel = hiltViewModel()) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize()
-                ) {
-                    items(6) { WardrobeItemSkeleton() }
-                }
+                ) { items(6) { WardrobeItemSkeleton() } }
             } else if (uiState.items.isEmpty()) {
                 EmptyWardrobeState(onAddItem = { viewModel.showAddSheet() })
             } else {
@@ -85,41 +95,204 @@ fun WardrobeScreen(viewModel: WardrobeViewModel = hiltViewModel()) {
             modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
             containerColor = VastraCharcoal,
             contentColor = VastraCream
-        ) {
-            Icon(Icons.Filled.Add, "Add Item")
+        ) { Icon(Icons.Filled.Add, "Add Item") }
+
+        // Error snackbar
+        uiState.error?.let { msg ->
+            Snackbar(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                action = { TextButton(onClick = { viewModel.clearError() }) { Text("Dismiss") } }
+            ) { Text(msg) }
         }
 
         if (uiState.showAddSheet) {
             AddItemBottomSheet(
                 onDismiss = { viewModel.hideAddSheet() },
-                onScanFromCamera = { viewModel.hideAddSheet() },
-                onPickFromGallery = { viewModel.hideAddSheet() },
-                onManualEntry = { viewModel.hideAddSheet() },
-                onImportZara = { viewModel.hideAddSheet() },
-                onImportHM = { viewModel.hideAddSheet() }
+                onPickFromGallery = {
+                    viewModel.hideAddSheet()
+                    galleryLauncher.launch("image/*")
+                },
+                onManualEntry = { viewModel.hideAddSheet() }
             )
         }
 
-        uiState.showScanResult?.let { job ->
-            AlertDialog(
-                onDismissRequest = { viewModel.dismissScanResult() },
-                containerColor = VastraSurface,
-                title = { Text("Scan Complete!", style = MaterialTheme.typography.headlineSmall) },
-                text = {
-                    Text(
-                        "Found ${job.detectedItems.size} clothing ${if (job.detectedItems.size == 1) "item" else "items"} in your photo.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = { viewModel.dismissScanResult() }) {
-                        Text("Great!", color = VastraGold)
-                    }
-                }
+        // Detected-items selection sheet — shown when a scan completes
+        uiState.pendingConfirmJob?.let { job ->
+            ScanResultSelectionSheet(
+                detectedItems = job.detectedItems,
+                selectedIndices = uiState.selectedDetectedIndices,
+                isConfirming = uiState.isConfirming,
+                onToggle = { viewModel.toggleDetectedItem(it) },
+                onConfirm = { viewModel.confirmSelectedItems() },
+                onDismiss = { viewModel.dismissScanResult() }
             )
         }
     }
 }
+
+// ─── Scan result selection bottom sheet ─────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ScanResultSelectionSheet(
+    detectedItems: List<DetectedScanItem>,
+    selectedIndices: Set<Int>,
+    isConfirming: Boolean,
+    onToggle: (Int) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = VastraSurface,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("Items Detected", style = MaterialTheme.typography.titleLarge, color = VastraCharcoal)
+                    Text(
+                        "Select the items to add to your wardrobe",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = VastraSubtext
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, "Dismiss", tint = VastraSubtext)
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            detectedItems.forEachIndexed { index, item ->
+                DetectedItemRow(
+                    item = item,
+                    isSelected = index in selectedIndices,
+                    onToggle = { onToggle(index) }
+                )
+                if (index < detectedItems.lastIndex) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = VastraOutline)
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            val count = selectedIndices.size
+            Button(
+                onClick = onConfirm,
+                enabled = count > 0 && !isConfirming,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = VastraCharcoal)
+            ) {
+                if (isConfirming) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = VastraCream,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        if (count == 0) "Select items to add"
+                        else "Add $count ${if (count == 1) "item" else "items"} to wardrobe",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = VastraCream
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DetectedItemRow(
+    item: DetectedScanItem,
+    isSelected: Boolean,
+    onToggle: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Crop image preview
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(VastraSurfaceVariant)
+        ) {
+            if (item.cropUrl != null) {
+                AsyncImage(
+                    model = item.cropUrl,
+                    contentDescription = item.subCategory.ifEmpty { item.category.name },
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Icon(
+                    Icons.Filled.Checkroom,
+                    contentDescription = null,
+                    modifier = Modifier.align(Alignment.Center).size(32.dp),
+                    tint = VastraOutline
+                )
+            }
+        }
+
+        // Labels and color palette
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                item.category.label,
+                style = MaterialTheme.typography.labelMedium,
+                color = VastraSubtext
+            )
+            Text(
+                item.subCategory.ifEmpty { item.category.label },
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = VastraCharcoal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (item.colorPalette.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    item.colorPalette.take(3).forEach { hex ->
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .clip(CircleShape)
+                                .background(parseHexColor(hex))
+                                .border(0.5.dp, VastraOutline, CircleShape)
+                        )
+                    }
+                }
+            }
+        }
+
+        Checkbox(
+            checked = isSelected,
+            onCheckedChange = { onToggle() },
+            colors = CheckboxDefaults.colors(
+                checkedColor = VastraCharcoal,
+                uncheckedColor = VastraOutline
+            )
+        )
+    }
+}
+
+// ─── Wardrobe grid components ────────────────────────────────────────────────
 
 @Composable
 fun CategoryFilterRow(selectedCategory: ClothingCategory?, onCategorySelected: (ClothingCategory?) -> Unit) {
@@ -239,26 +412,30 @@ fun ScanningIndicator() {
 @Composable
 fun AddItemBottomSheet(
     onDismiss: () -> Unit,
-    onScanFromCamera: () -> Unit,
     onPickFromGallery: () -> Unit,
-    onManualEntry: () -> Unit,
-    onImportZara: () -> Unit,
-    onImportHM: () -> Unit
+    onManualEntry: () -> Unit
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = VastraSurface,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp)) {
-            Text("Add to Wardrobe", style = MaterialTheme.typography.titleLarge, color = VastraCharcoal, modifier = Modifier.padding(bottom = 24.dp))
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
+            Text(
+                "Add to Wardrobe",
+                style = MaterialTheme.typography.titleLarge,
+                color = VastraCharcoal,
+                modifier = Modifier.padding(bottom = 24.dp)
+            )
             listOf(
-                Triple(Icons.Filled.CameraAlt, "Scan with Camera", onScanFromCamera),
                 Triple(Icons.Filled.PhotoLibrary, "Choose from Gallery", onPickFromGallery),
                 Triple(Icons.Filled.Edit, "Enter Manually", onManualEntry),
             ).forEach { (icon, label, action) ->
                 Row(
-                    modifier = Modifier.fillMaxWidth().clickable(onClick = action).padding(vertical = 14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = action)
+                        .padding(vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
@@ -266,23 +443,18 @@ fun AddItemBottomSheet(
                     Text(label, style = MaterialTheme.typography.bodyLarge, color = VastraCharcoal)
                 }
             }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = VastraOutline)
-            Text("Import Purchase History", style = MaterialTheme.typography.labelMedium, color = VastraSubtext, modifier = Modifier.padding(bottom = 8.dp))
-            listOf(
-                Triple(Icons.Filled.ShoppingBag, "Import from Zara", onImportZara),
-                Triple(Icons.Filled.ShoppingBag, "Import from H&M", onImportHM),
-            ).forEach { (icon, label, action) ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().clickable(onClick = action).padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Icon(icon, null, tint = VastraSubtext, modifier = Modifier.size(20.dp))
-                    Text(label, style = MaterialTheme.typography.bodyMedium, color = VastraCharcoal)
-                    Spacer(Modifier.weight(1f))
-                    Surface(color = VastraGoldLight, shape = RoundedCornerShape(8.dp)) {
-                        Text("Connect", modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = VastraGoldDark)
-                    }
+            // Camera — coming soon
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Icon(Icons.Filled.CameraAlt, null, tint = VastraOutline, modifier = Modifier.size(22.dp))
+                Text("Scan with Camera", style = MaterialTheme.typography.bodyLarge, color = VastraOutline)
+                Spacer(Modifier.weight(1f))
+                Surface(color = VastraGoldLight, shape = RoundedCornerShape(8.dp)) {
+                    Text("Soon", modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        style = MaterialTheme.typography.labelSmall, color = VastraGoldDark)
                 }
             }
         }
@@ -323,3 +495,16 @@ fun WardrobeItemSkeleton() {
 private fun parseHexColor(hex: String): Color = try {
     Color(android.graphics.Color.parseColor(if (hex.startsWith("#")) hex else "#$hex"))
 } catch (e: Exception) { Color.LightGray }
+
+/** Copy a content URI to a temporary file so it can be sent as a multipart body. */
+private fun Uri.toTempFile(context: Context): File {
+    val input = context.contentResolver.openInputStream(this)!!
+    val suffix = when (context.contentResolver.getType(this)) {
+        "image/png"  -> ".png"
+        "image/webp" -> ".webp"
+        else         -> ".jpg"
+    }
+    val tmp = File.createTempFile("scan_", suffix, context.cacheDir)
+    tmp.outputStream().use { input.copyTo(it) }
+    return tmp
+}

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vastra.data.model.ClothingCategory
 import com.vastra.data.model.ClothingItem
+import com.vastra.data.model.DetectedScanItem
 import com.vastra.data.model.OwnershipStatus
 import com.vastra.data.model.ScanJob
 import com.vastra.data.model.ScanStatus
@@ -25,8 +26,14 @@ data class WardrobeUiState(
     val error: String? = null,
     val selectedCategory: ClothingCategory? = null,
     val showAddSheet: Boolean = false,
+    // Non-null while a scan is still polling
     val activeScanJobs: Map<String, ScanJob> = emptyMap(),
-    val showScanResult: ScanJob? = null
+    // Non-null when scan is COMPLETE and user needs to pick which items to confirm
+    val pendingConfirmJob: ScanJob? = null,
+    val pendingJobId: String? = null,
+    // Indices of detectedItems the user has checked
+    val selectedDetectedIndices: Set<Int> = emptySet(),
+    val isConfirming: Boolean = false
 )
 
 @HiltViewModel
@@ -61,10 +68,7 @@ class WardrobeViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(showAddSheet = false) }
             when (val result = repo.scanItem(imageFile)) {
-                is ApiResult.Success -> {
-                    val jobId = result.data.jobId
-                    pollScanJob(jobId)
-                }
+                is ApiResult.Success -> pollScanJob(result.data.jobId)
                 is ApiResult.Error -> _uiState.update { it.copy(error = result.message) }
             }
         }
@@ -83,11 +87,14 @@ class WardrobeViewModel @Inject constructor(
                         }
                         when (job.status) {
                             ScanStatus.COMPLETE -> {
+                                // Pre-select all items; user can deselect the wrong ones
+                                val allIndices = job.detectedItems.indices.toSet()
                                 _uiState.update { state ->
                                     state.copy(
                                         activeScanJobs = state.activeScanJobs - jobId,
-                                        showScanResult = job,
-                                        items = state.items + job.detectedItems
+                                        pendingConfirmJob = job,
+                                        pendingJobId = jobId,
+                                        selectedDetectedIndices = allIndices
                                     )
                                 }
                                 return@launch
@@ -117,6 +124,36 @@ class WardrobeViewModel @Inject constructor(
         }
     }
 
+    fun toggleDetectedItem(index: Int) {
+        _uiState.update { state ->
+            val current = state.selectedDetectedIndices
+            val updated = if (index in current) current - index else current + index
+            state.copy(selectedDetectedIndices = updated)
+        }
+    }
+
+    fun confirmSelectedItems() {
+        val state = _uiState.value
+        val jobId = state.pendingJobId ?: return
+        val indices = state.selectedDetectedIndices.sorted()
+        if (indices.isEmpty()) {
+            dismissScanResult()
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isConfirming = true) }
+            for (index in indices) {
+                repo.confirmScanItem(jobId, index)
+            }
+            _uiState.update { it.copy(isConfirming = false, pendingConfirmJob = null, pendingJobId = null, selectedDetectedIndices = emptySet()) }
+            loadWardrobe()
+        }
+    }
+
+    fun dismissScanResult() = _uiState.update {
+        it.copy(pendingConfirmJob = null, pendingJobId = null, selectedDetectedIndices = emptySet())
+    }
+
     fun deleteItem(itemId: String) {
         viewModelScope.launch {
             when (repo.deleteItem(itemId)) {
@@ -128,6 +165,5 @@ class WardrobeViewModel @Inject constructor(
         }
     }
 
-    fun dismissScanResult() = _uiState.update { it.copy(showScanResult = null) }
     fun clearError() = _uiState.update { it.copy(error = null) }
 }
