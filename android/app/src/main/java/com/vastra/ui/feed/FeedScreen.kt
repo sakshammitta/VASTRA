@@ -57,8 +57,9 @@ fun FeedScreen(viewModel: FeedViewModel = hiltViewModel()) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("VASTRA", style = MaterialTheme.typography.headlineMedium, color = VastraCharcoal, fontWeight = FontWeight.Bold)
-                        IconButton(onClick = {}) {
-                            Icon(Icons.Outlined.Notifications, "Notifications", tint = VastraCharcoal)
+                        // Notifications not implemented yet — shown disabled so it isn't misleading.
+                        IconButton(onClick = {}, enabled = false) {
+                            Icon(Icons.Outlined.Notifications, "Notifications (coming soon)", tint = VastraSubtext.copy(alpha = 0.4f))
                         }
                     }
                 }
@@ -131,13 +132,15 @@ fun PostCard(
                         Text(post.styleMetadata.styleLabels.first(), style = MaterialTheme.typography.labelSmall, color = VastraSubtext)
                     }
                 }
+                // Follow / social graph not wired yet — disabled so it isn't misleading.
                 OutlinedButton(
                     onClick = {},
+                    enabled = false,
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                    border = BorderStroke(1.dp, VastraGold),
+                    border = BorderStroke(1.dp, VastraOutline),
                     shape = RoundedCornerShape(20.dp)
                 ) {
-                    Text("Follow", color = VastraGold, style = MaterialTheme.typography.labelMedium)
+                    Text("Follow", color = VastraSubtext.copy(alpha = 0.5f), style = MaterialTheme.typography.labelMedium)
                 }
             }
 

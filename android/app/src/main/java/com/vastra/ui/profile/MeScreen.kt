@@ -59,9 +59,9 @@ fun MeScreen(
                     )
                     Text("Me", style = MaterialTheme.typography.headlineLarge, color = VastraInk)
                 }
-                IconButton(onClick = {}) {
-                    // Settings — placeholder until a settings screen exists.
-                    Icon(Icons.Outlined.Settings, "Settings", tint = VastraInk)
+                IconButton(onClick = {}, enabled = false) {
+                    // Settings screen not built yet — disabled so it isn't misleading.
+                    Icon(Icons.Outlined.Settings, "Settings (coming soon)", tint = VastraMutedText.copy(alpha = 0.4f))
                 }
             }
 
