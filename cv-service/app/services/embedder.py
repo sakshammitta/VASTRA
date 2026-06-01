@@ -12,35 +12,44 @@ _ALLOW_MOCK: bool = os.getenv("CV_ALLOW_MOCK", "false").lower() == "true"
 _fashion_clip_model = None
 _models_loaded = False
 
-_CATEGORY_LABELS = [
-    "top", "shirt", "t-shirt", "blouse", "sweater", "hoodie",
-    "pants", "trousers", "jeans", "shorts", "skirt",
-    "dress", "jumpsuit",
-    "jacket", "coat", "blazer", "outerwear",
-    "shoes", "boots", "sneakers", "footwear",
-    "bag", "purse", "backpack", "handbag",
-    "accessory", "hat", "belt", "scarf",
-    "suit",
-]
-
-_LABEL_TO_CATEGORY: dict[str, ClothingCategory] = {
-    "top": ClothingCategory.TOP, "shirt": ClothingCategory.TOP,
-    "t-shirt": ClothingCategory.TOP, "blouse": ClothingCategory.TOP,
-    "sweater": ClothingCategory.TOP, "hoodie": ClothingCategory.TOP,
-    "pants": ClothingCategory.BOTTOM, "trousers": ClothingCategory.BOTTOM,
-    "jeans": ClothingCategory.BOTTOM, "shorts": ClothingCategory.BOTTOM,
+# ── Controlled fashion subtype taxonomy ───────────────────────────────────────
+# FashionCLIP classifies each crop against THIS list (independent of the
+# Grounding-DINO phrase). Each subtype maps to a broad ClothingCategory.
+_SUBTYPE_TO_CATEGORY: dict[str, ClothingCategory] = {
+    "t-shirt": ClothingCategory.TOP,
+    "shirt": ClothingCategory.TOP,
+    "polo shirt": ClothingCategory.TOP,
+    "blouse": ClothingCategory.TOP,
+    "tank top": ClothingCategory.TOP,
+    "sweater": ClothingCategory.TOP,
+    "hoodie": ClothingCategory.TOP,
+    "jacket": ClothingCategory.OUTERWEAR,
+    "coat": ClothingCategory.OUTERWEAR,
+    "blazer": ClothingCategory.OUTERWEAR,
+    "jeans": ClothingCategory.BOTTOM,
+    "trousers": ClothingCategory.BOTTOM,
+    "shorts": ClothingCategory.BOTTOM,
     "skirt": ClothingCategory.BOTTOM,
-    "dress": ClothingCategory.DRESS, "jumpsuit": ClothingCategory.DRESS,
-    "jacket": ClothingCategory.OUTERWEAR, "coat": ClothingCategory.OUTERWEAR,
-    "blazer": ClothingCategory.OUTERWEAR, "outerwear": ClothingCategory.OUTERWEAR,
-    "shoes": ClothingCategory.FOOTWEAR, "boots": ClothingCategory.FOOTWEAR,
-    "sneakers": ClothingCategory.FOOTWEAR, "footwear": ClothingCategory.FOOTWEAR,
-    "bag": ClothingCategory.BAG, "purse": ClothingCategory.BAG,
-    "backpack": ClothingCategory.BAG, "handbag": ClothingCategory.BAG,
-    "accessory": ClothingCategory.ACCESSORY, "hat": ClothingCategory.ACCESSORY,
-    "belt": ClothingCategory.ACCESSORY, "scarf": ClothingCategory.ACCESSORY,
+    "dress": ClothingCategory.DRESS,
+    "jumpsuit": ClothingCategory.DRESS,
+    "shoes": ClothingCategory.FOOTWEAR,
+    "sneakers": ClothingCategory.FOOTWEAR,
+    "boots": ClothingCategory.FOOTWEAR,
+    "bag": ClothingCategory.BAG,
+    "backpack": ClothingCategory.BAG,
+    "hat": ClothingCategory.ACCESSORY,
+    "scarf": ClothingCategory.ACCESSORY,
+    "belt": ClothingCategory.ACCESSORY,
     "suit": ClothingCategory.SUIT,
 }
+
+_SUBTYPES: list[str] = list(_SUBTYPE_TO_CATEGORY.keys())
+
+# Prompt template improves FashionCLIP zero-shot accuracy vs bare nouns.
+_SUBTYPE_PROMPTS: list[str] = [f"a photo of a {s}" for s in _SUBTYPES]
+
+# Cached text embeddings (computed once after the model loads).
+_subtype_text_embeddings = None
 
 
 def load_models() -> None:
@@ -57,9 +66,9 @@ def load_models() -> None:
         if _ALLOW_MOCK:
             logger.warning(f"FashionCLIP unavailable ({exc}). Mock embeddings enabled.")
         else:
-            logger.error(
+            logger.info(
                 f"FashionCLIP unavailable ({exc}). "
-                "CV_ALLOW_MOCK=false → heuristic category only, zero embedding."
+                "Embeddings will be null; subtype falls back to the detection label."
             )
         _models_loaded = False
 
@@ -68,11 +77,23 @@ def is_loaded() -> bool:
     return _models_loaded
 
 
+def _subtype_texts() -> np.ndarray:
+    """Lazily compute + cache FashionCLIP text embeddings for the taxonomy."""
+    global _subtype_text_embeddings
+    if _subtype_text_embeddings is None:
+        embs = _fashion_clip_model.encode_text(_SUBTYPE_PROMPTS, batch_size=32)
+        embs = np.asarray(embs, dtype=np.float32)
+        # L2-normalize for cosine similarity
+        norms = np.linalg.norm(embs, axis=1, keepdims=True)
+        _subtype_text_embeddings = embs / np.clip(norms, 1e-8, None)
+    return _subtype_text_embeddings
+
+
 def get_embedding(image: Image.Image) -> list[float] | None:
     """
-    Return 512-dim FashionCLIP embedding, or None when FashionCLIP is not loaded.
-    Callers must treat None as "embedding unavailable" and store NULL, not a
-    zero vector — a zero vector would produce misleading similarity results.
+    Return a normalized 512-dim FashionCLIP image embedding, or None when
+    FashionCLIP is not loaded. Callers store None as NULL — never a zero
+    vector, which would corrupt similarity search.
     """
     if not _models_loaded:
         if _ALLOW_MOCK:
@@ -80,38 +101,75 @@ def get_embedding(image: Image.Image) -> list[float] | None:
         return None
     try:
         embeddings = _fashion_clip_model.encode_images([image], batch_size=1)
-        vec = embeddings[0]
+        vec = np.asarray(embeddings[0], dtype=np.float32)
         norm = np.linalg.norm(vec)
         if norm > 0:
             vec = vec / norm
         return vec.tolist()
     except Exception as exc:
         logger.error(f"FashionCLIP embedding failed: {exc}")
-        return [0.0] * 512
+        return None
 
 
-def classify_category(image: Image.Image, detection_label: str) -> tuple[ClothingCategory, str]:
+def classify_subtype(
+    image: Image.Image,
+    detection_label: str,
+) -> tuple[ClothingCategory, str, float]:
     """
-    Classify category via FashionCLIP text-image similarity.
-    Falls back to heuristic label matching (good enough once DINO gives real labels).
+    Classify a garment crop into the controlled subtype taxonomy.
+
+    Primary path (FashionCLIP loaded): zero-shot image-text similarity against
+    _SUBTYPES — this is the real fashion-specific classifier and is what
+    distinguishes a t-shirt from a jacket regardless of the DINO phrase.
+
+    Fallback (FashionCLIP not loaded): map the Grounding-DINO detection label
+    into the taxonomy. This is best-effort only and may be wrong (e.g. a tee
+    detected as "jacket"); the user corrects it in the confirmation UI.
+
+    Returns (category, subtype, confidence). confidence is 0.0 in the fallback
+    path to signal the prediction is unverified.
     """
-    if not _models_loaded:
-        return _heuristic_category(detection_label)
-    try:
-        text_embeddings = _fashion_clip_model.encode_text(_CATEGORY_LABELS, batch_size=32)
-        img_embedding = np.array(get_embedding(image))
-        similarities = text_embeddings @ img_embedding
-        best_idx = int(np.argmax(similarities))
-        best_label = _CATEGORY_LABELS[best_idx]
-        category = _LABEL_TO_CATEGORY.get(best_label, ClothingCategory.OTHER)
-        return category, best_label
-    except Exception as exc:
-        logger.error(f"Category classification failed: {exc}")
-        return _heuristic_category(detection_label)
+    if _models_loaded:
+        try:
+            img_emb = np.asarray(get_embedding(image), dtype=np.float32)
+            sims = _subtype_texts() @ img_emb            # cosine (both normalized)
+            best_idx = int(np.argmax(sims))
+            subtype = _SUBTYPES[best_idx]
+            category = _SUBTYPE_TO_CATEGORY[subtype]
+            confidence = float(sims[best_idx])
+            return category, subtype, confidence
+        except Exception as exc:
+            logger.error(f"FashionCLIP subtype classification failed: {exc}")
+
+    # Fallback: derive subtype from the DINO label, constrained to the taxonomy.
+    category, subtype = _label_to_taxonomy(detection_label)
+    return category, subtype, 0.0
+
+
+def _label_to_taxonomy(label: str) -> tuple[ClothingCategory, str]:
+    """Map a free-form DINO label to the nearest taxonomy subtype + category."""
+    norm = label.lower().replace(" ", "").replace("-", "").strip()
+    # Direct / substring match against taxonomy keys
+    for subtype, cat in _SUBTYPE_TO_CATEGORY.items():
+        key = subtype.lower().replace(" ", "").replace("-", "")
+        if key in norm or norm in key:
+            return cat, subtype
+    # A few common DINO synonyms not spelled exactly like the taxonomy
+    synonyms = {
+        "top": ("t-shirt", ClothingCategory.TOP),
+        "pants": ("trousers", ClothingCategory.BOTTOM),
+        "footwear": ("shoes", ClothingCategory.FOOTWEAR),
+        "handbag": ("bag", ClothingCategory.BAG),
+        "purse": ("bag", ClothingCategory.BAG),
+    }
+    for syn, (subtype, cat) in synonyms.items():
+        if syn in norm:
+            return cat, subtype
+    return ClothingCategory.OTHER, label.lower().strip()
 
 
 def extract_colors(image: Image.Image, k: int = 3) -> list[str]:
-    """Top-k dominant colors via K-means in LAB color space."""
+    """Top-k dominant colors via K-means in LAB color space (no ML model)."""
     try:
         from sklearn.cluster import KMeans
         from skimage import color as skcolor
@@ -156,11 +214,3 @@ def _mock_embedding() -> list[float]:
     vec = rng.normal(0, 1, 512).astype(np.float32)
     vec = vec / np.linalg.norm(vec)
     return vec.tolist()
-
-
-def _heuristic_category(label: str) -> tuple[ClothingCategory, str]:
-    label_lower = label.lower()
-    for key, cat in _LABEL_TO_CATEGORY.items():
-        if key in label_lower:
-            return cat, key
-    return ClothingCategory.OTHER, label_lower

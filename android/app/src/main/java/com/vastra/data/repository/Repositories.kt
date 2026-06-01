@@ -114,8 +114,20 @@ class WardrobeRepository @Inject constructor(private val api: VastraApiService) 
         if (r.isSuccessful) ApiResult.Success(r.body()!!) else ApiResult.Error(r.message(), r.code())
     } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
 
-    suspend fun confirmScanItem(jobId: String, itemIndex: Int): ApiResult<ClothingItem> = try {
-        val r = api.confirmScanItem(jobId, ConfirmScanItemRequest(itemIndex = itemIndex))
+    suspend fun confirmScanItem(
+        jobId: String,
+        itemIndex: Int,
+        category: ClothingCategory? = null,
+        subCategory: String? = null
+    ): ApiResult<ClothingItem> = try {
+        val r = api.confirmScanItem(
+            jobId,
+            ConfirmScanItemRequest(
+                itemIndex = itemIndex,
+                category = category?.name,
+                subCategory = subCategory
+            )
+        )
         if (r.isSuccessful) ApiResult.Success(r.body()!!) else ApiResult.Error(r.message(), r.code())
     } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
 

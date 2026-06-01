@@ -33,6 +33,9 @@ data class WardrobeUiState(
     val pendingJobId: String? = null,
     // Indices of detectedItems the user has checked
     val selectedDetectedIndices: Set<Int> = emptySet(),
+    // User-edited category/subcategory per detected-item index (overrides CV guess)
+    val editedCategories: Map<Int, ClothingCategory> = emptyMap(),
+    val editedSubcategories: Map<Int, String> = emptyMap(),
     val isConfirming: Boolean = false
 )
 
@@ -87,14 +90,20 @@ class WardrobeViewModel @Inject constructor(
                         }
                         when (job.status) {
                             ScanStatus.COMPLETE -> {
-                                // Pre-select all items; user can deselect the wrong ones
+                                // Pre-select all items; user can deselect the wrong ones.
+                                // Seed the editable fields with the CV predictions so the
+                                // user only changes what's wrong (e.g. jacket → t-shirt).
                                 val allIndices = job.detectedItems.indices.toSet()
+                                val seedCats = job.detectedItems.mapIndexed { i, it -> i to it.category }.toMap()
+                                val seedSubs = job.detectedItems.mapIndexed { i, it -> i to it.subCategory }.toMap()
                                 _uiState.update { state ->
                                     state.copy(
                                         activeScanJobs = state.activeScanJobs - jobId,
                                         pendingConfirmJob = job,
                                         pendingJobId = jobId,
-                                        selectedDetectedIndices = allIndices
+                                        selectedDetectedIndices = allIndices,
+                                        editedCategories = seedCats,
+                                        editedSubcategories = seedSubs
                                     )
                                 }
                                 return@launch
@@ -132,6 +141,14 @@ class WardrobeViewModel @Inject constructor(
         }
     }
 
+    fun setItemCategory(index: Int, category: ClothingCategory) {
+        _uiState.update { it.copy(editedCategories = it.editedCategories + (index to category)) }
+    }
+
+    fun setItemSubcategory(index: Int, subCategory: String) {
+        _uiState.update { it.copy(editedSubcategories = it.editedSubcategories + (index to subCategory)) }
+    }
+
     fun confirmSelectedItems() {
         val state = _uiState.value
         val jobId = state.pendingJobId ?: return
@@ -142,16 +159,39 @@ class WardrobeViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _uiState.update { it.copy(isConfirming = true) }
+            val edits = _uiState.value
             for (index in indices) {
-                repo.confirmScanItem(jobId, index)
+                // Send the user-edited category/subcategory so a wrong CV guess
+                // (e.g. jacket) is saved as the user's correction (e.g. t-shirt).
+                repo.confirmScanItem(
+                    jobId = jobId,
+                    itemIndex = index,
+                    category = edits.editedCategories[index],
+                    subCategory = edits.editedSubcategories[index]?.takeIf { it.isNotBlank() }
+                )
             }
-            _uiState.update { it.copy(isConfirming = false, pendingConfirmJob = null, pendingJobId = null, selectedDetectedIndices = emptySet()) }
+            _uiState.update {
+                it.copy(
+                    isConfirming = false,
+                    pendingConfirmJob = null,
+                    pendingJobId = null,
+                    selectedDetectedIndices = emptySet(),
+                    editedCategories = emptyMap(),
+                    editedSubcategories = emptyMap()
+                )
+            }
             loadWardrobe()
         }
     }
 
     fun dismissScanResult() = _uiState.update {
-        it.copy(pendingConfirmJob = null, pendingJobId = null, selectedDetectedIndices = emptySet())
+        it.copy(
+            pendingConfirmJob = null,
+            pendingJobId = null,
+            selectedDetectedIndices = emptySet(),
+            editedCategories = emptyMap(),
+            editedSubcategories = emptyMap()
+        )
     }
 
     fun deleteItem(itemId: String) {

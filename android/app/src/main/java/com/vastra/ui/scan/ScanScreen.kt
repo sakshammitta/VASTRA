@@ -248,8 +248,12 @@ fun ScanScreen(
             com.vastra.ui.wardrobe.ScanResultSelectionSheet(
                 detectedItems = job.detectedItems,
                 selectedIndices = uiState.selectedDetectedIndices,
+                editedCategories = uiState.editedCategories,
+                editedSubcategories = uiState.editedSubcategories,
                 isConfirming = uiState.isConfirming,
                 onToggle = { viewModel.toggleDetectedItem(it) },
+                onCategoryChange = { i, c -> viewModel.setItemCategory(i, c) },
+                onSubcategoryChange = { i, s -> viewModel.setItemSubcategory(i, s) },
                 onConfirm = {
                     viewModel.confirmSelectedItems()
                     onBack()

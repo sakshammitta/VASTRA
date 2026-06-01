@@ -34,24 +34,35 @@ def main(path: str) -> int:
 
     detections = detector.detect_clothing(image)
 
-    print(f"\n{'='*52}")
+    if not embedder.is_loaded():
+        print(
+            "\nℹ  FashionCLIP NOT loaded — subtype is inferred from the DINO\n"
+            "   label (unverified). Build/run with fashion-clip for real subtype\n"
+            "   classification.\n"
+        )
+
+    from app.services import segmenter
+
+    print(f"\n{'='*60}")
     print(f"Detections: {len(detections)}")
-    print(f"{'='*52}")
+    print(f"{'='*60}")
 
     categories = []
     for i, d in enumerate(detections):
-        cat, sub = embedder._heuristic_category(d.label)
+        crop = segmenter.segment_crop(image, d.bbox)
+        cat, sub, conf = embedder.classify_subtype(crop, d.label)
         categories.append(cat.value)
+        verified = "FashionCLIP" if conf > 0 else "label-fallback"
         print(
-            f"  [{i}] label='{d.label}'  conf={d.confidence:.2f}  "
-            f"category={cat.value}  bbox=({d.bbox.x_min:.2f},{d.bbox.y_min:.2f},"
-            f"{d.bbox.x_max:.2f},{d.bbox.y_max:.2f})"
+            f"  [{i}] dino_label='{d.label}'  dino_conf={d.confidence:.2f}\n"
+            f"       → subtype='{sub}'  category={cat.value}  "
+            f"subtype_conf={conf:.2f} ({verified})"
         )
 
     tops = categories.count("TOP")
     bottoms = categories.count("BOTTOM")
     print(f"\n  TOP count={tops}   BOTTOM count={bottoms}")
-    print(f"{'='*52}\n")
+    print(f"{'='*60}\n")
     return 0
 
 

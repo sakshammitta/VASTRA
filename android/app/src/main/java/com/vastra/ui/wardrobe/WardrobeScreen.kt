@@ -218,8 +218,12 @@ fun WardrobeScreen(
             ScanResultSelectionSheet(
                 detectedItems = job.detectedItems,
                 selectedIndices = uiState.selectedDetectedIndices,
+                editedCategories = uiState.editedCategories,
+                editedSubcategories = uiState.editedSubcategories,
                 isConfirming = uiState.isConfirming,
                 onToggle = { viewModel.toggleDetectedItem(it) },
+                onCategoryChange = { i, c -> viewModel.setItemCategory(i, c) },
+                onSubcategoryChange = { i, s -> viewModel.setItemSubcategory(i, s) },
                 onConfirm = { viewModel.confirmSelectedItems() },
                 onDismiss = { viewModel.dismissScanResult() }
             )
@@ -264,8 +268,12 @@ private fun StatCard(label: String, value: String, modifier: Modifier = Modifier
 fun ScanResultSelectionSheet(
     detectedItems: List<DetectedScanItem>,
     selectedIndices: Set<Int>,
+    editedCategories: Map<Int, ClothingCategory>,
+    editedSubcategories: Map<Int, String>,
     isConfirming: Boolean,
     onToggle: (Int) -> Unit,
+    onCategoryChange: (Int, ClothingCategory) -> Unit,
+    onSubcategoryChange: (Int, String) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -286,9 +294,9 @@ fun ScanResultSelectionSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("Items Detected", style = MaterialTheme.typography.titleLarge, color = VastraInk)
+                    Text("Review detected items", style = MaterialTheme.typography.titleLarge, color = VastraInk)
                     Text(
-                        "Select the items to add to your wardrobe",
+                        "Check the type and fix it if it's wrong before saving",
                         style = MaterialTheme.typography.bodySmall,
                         color = VastraMutedText
                     )
@@ -304,7 +312,11 @@ fun ScanResultSelectionSheet(
                 DetectedItemRow(
                     item = item,
                     isSelected = index in selectedIndices,
-                    onToggle = { onToggle(index) }
+                    category = editedCategories[index] ?: item.category,
+                    subCategory = editedSubcategories[index] ?: item.subCategory,
+                    onToggle = { onToggle(index) },
+                    onCategoryChange = { onCategoryChange(index, it) },
+                    onSubcategoryChange = { onSubcategoryChange(index, it) }
                 )
                 if (index < detectedItems.lastIndex) {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = VastraBorderColor)
@@ -336,73 +348,146 @@ fun ScanResultSelectionSheet(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DetectedItemRow(
     item: DetectedScanItem,
     isSelected: Boolean,
-    onToggle: () -> Unit
+    category: ClothingCategory,
+    subCategory: String,
+    onToggle: () -> Unit,
+    onCategoryChange: (ClothingCategory) -> Unit,
+    onSubcategoryChange: (String) -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onToggle)
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(72.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(VastraMuted)
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (item.cropUrl != null) {
-                AsyncImage(
-                    model = item.cropUrl,
-                    contentDescription = item.subCategory.ifEmpty { item.category.name },
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Icon(
-                    Icons.Filled.Checkroom,
-                    contentDescription = null,
-                    modifier = Modifier.align(Alignment.Center).size(32.dp),
-                    tint = VastraBorderColor
-                )
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(VastraMuted)
+            ) {
+                if (item.cropUrl != null) {
+                    AsyncImage(
+                        model = item.cropUrl,
+                        contentDescription = subCategory.ifEmpty { category.name },
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        Icons.Filled.Checkroom,
+                        contentDescription = null,
+                        modifier = Modifier.align(Alignment.Center).size(32.dp),
+                        tint = VastraBorderColor
+                    )
+                }
             }
-        }
 
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(item.category.label, style = MaterialTheme.typography.labelMedium, color = VastraMutedText)
-            Text(
-                item.subCategory.ifEmpty { item.category.label },
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                color = VastraInk,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (item.colorPalette.isNotEmpty()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    item.colorPalette.take(3).forEach { hex ->
-                        Box(
-                            modifier = Modifier
-                                .size(14.dp)
-                                .clip(CircleShape)
-                                .background(parseHexColor(hex))
-                                .border(0.5.dp, VastraBorderColor, CircleShape)
-                        )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Low-confidence / unverified hint so the user knows to check it.
+                if (item.subtypeConfidence <= 0f) {
+                    Text(
+                        "Detected type — please verify",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = VastraError
+                    )
+                } else {
+                    Text(
+                        "Detected • ${(item.subtypeConfidence * 100).toInt()}% match",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = VastraMutedText
+                    )
+                }
+                if (item.colorPalette.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        item.colorPalette.take(3).forEach { hex ->
+                            Box(
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .clip(CircleShape)
+                                    .background(parseHexColor(hex))
+                                    .border(0.5.dp, VastraBorderColor, CircleShape)
+                            )
+                        }
                     }
                 }
             }
+
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = { onToggle() },
+                colors = CheckboxDefaults.colors(checkedColor = VastraInk, uncheckedColor = VastraBorderColor)
+            )
         }
 
-        Checkbox(
-            checked = isSelected,
-            onCheckedChange = { onToggle() },
-            colors = CheckboxDefaults.colors(checkedColor = VastraInk, uncheckedColor = VastraBorderColor)
+        Spacer(Modifier.height(8.dp))
+
+        // Editable category + subtype so a wrong prediction can be corrected.
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            CategoryDropdown(
+                selected = category,
+                onSelected = onCategoryChange,
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+                value = subCategory,
+                onValueChange = onSubcategoryChange,
+                singleLine = true,
+                label = { Text("Type", style = MaterialTheme.typography.labelSmall) },
+                placeholder = { Text("e.g. t-shirt") },
+                textStyle = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = VastraInk,
+                    unfocusedBorderColor = VastraBorderColor
+                )
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CategoryDropdown(
+    selected: ClothingCategory,
+    onSelected: (ClothingCategory) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = modifier
+    ) {
+        OutlinedTextField(
+            value = selected.label,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Category", style = MaterialTheme.typography.labelSmall) },
+            textStyle = MaterialTheme.typography.bodySmall,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = VastraInk,
+                unfocusedBorderColor = VastraBorderColor
+            ),
+            modifier = Modifier.menuAnchor().fillMaxWidth()
         )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            ClothingCategory.values().forEach { cat ->
+                DropdownMenuItem(
+                    text = { Text(cat.label) },
+                    onClick = {
+                        onSelected(cat)
+                        expanded = false
+                    }
+                )
+            }
+        }
     }
 }
 

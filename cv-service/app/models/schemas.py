@@ -68,6 +68,9 @@ class DetectedItem(BaseModel):
     color_palette: list[str] = Field(..., description="Top-3 hex colors from K-means in LAB space")
     category: ClothingCategory
     sub_category: str = ""
+    # FashionCLIP subtype-classification confidence in [0,1]; 0.0 means the
+    # subtype was inferred from the detection label (unverified, user should confirm).
+    subtype_confidence: float = 0.0
     crop_key: Optional[str] = None
 
 

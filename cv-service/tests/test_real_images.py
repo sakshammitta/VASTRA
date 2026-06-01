@@ -50,7 +50,7 @@ def detector():
 @pytest.fixture(scope="module")
 def heuristic():
     import app.services.embedder as emb
-    return emb._heuristic_category
+    return emb._label_to_taxonomy
 
 
 def _categories(detections, heuristic) -> list[str]:

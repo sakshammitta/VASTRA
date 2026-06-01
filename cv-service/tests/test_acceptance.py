@@ -41,13 +41,12 @@ def embedder():
 
 
 def _categories(detections, embedder) -> list[str]:
-    """Return the ClothingCategory values inferred from each detection."""
-    from PIL import Image as PILImage
-    # We use heuristic category (label-based) since FashionCLIP may not be
-    # loaded yet. This is intentional for Milestone 1.
+    """Return ClothingCategory values via the label-fallback taxonomy mapping.
+    (Acceptance tests assert broad category from the DINO label; subtype
+    accuracy is exercised by the FashionCLIP-dependent tests.)"""
     cats = []
     for d in detections:
-        cat, _ = embedder._heuristic_category(d.label)
+        cat, _ = embedder._label_to_taxonomy(d.label)
         cats.append(cat.value)
     return cats
 

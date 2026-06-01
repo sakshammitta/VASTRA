@@ -21,8 +21,9 @@ torchvision==0.18.1
 transformers==4.42.3
 
 # ── Category + embedding — FashionCLIP ────────────────────────────────────────
-# Uncomment once Grounding-DINO milestone passes acceptance tests.
-# fashion-clip==0.2.1
+# Fashion-specific subtype classification + 512-dim embeddings. Downloads its
+# weights on first startup into HF_HOME (the model_cache volume), like DINO.
+fashion-clip==0.2.1
 
 # ── Segmentation — SAM ────────────────────────────────────────────────────────
 # Uncomment after FashionCLIP milestone.

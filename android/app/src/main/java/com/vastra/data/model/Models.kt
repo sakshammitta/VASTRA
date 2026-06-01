@@ -98,6 +98,7 @@ data class DetectedScanItem(
     @com.google.gson.annotations.SerializedName("cropUrl")    val cropUrl: String?,
     @com.google.gson.annotations.SerializedName("category")   val category: ClothingCategory = ClothingCategory.OTHER,
     @com.google.gson.annotations.SerializedName("sub_category") val subCategory: String = "",
+    @com.google.gson.annotations.SerializedName("subtype_confidence") val subtypeConfidence: Float = 0f,
     @com.google.gson.annotations.SerializedName("color_palette") val colorPalette: List<String> = emptyList()
 )
 

@@ -37,8 +37,12 @@ async def embed_detections(request: EmbedRequest):
             # Colors: K-means in LAB space — always available, no ML model needed.
             colors = embedder.extract_colors(crop, k=3)
 
-            # Category: FashionCLIP similarity when loaded, label heuristic otherwise.
-            category, sub_category = embedder.classify_category(crop, detection.label)
+            # Subtype + category: FashionCLIP zero-shot against the controlled
+            # taxonomy when loaded (the real fashion classifier), else best-effort
+            # mapping from the Grounding-DINO label (confidence 0.0 = unverified).
+            category, sub_category, subtype_conf = embedder.classify_subtype(
+                crop, detection.label
+            )
 
             # Embedding: FashionCLIP when loaded, None otherwise.
             # The schema and backend both accept None; it maps to NULL in pgvector.
@@ -56,6 +60,7 @@ async def embed_detections(request: EmbedRequest):
                 color_palette=colors,
                 category=category,
                 sub_category=sub_category,
+                subtype_confidence=subtype_conf,
                 crop_key=crop_key,
             ))
         except Exception as e:
