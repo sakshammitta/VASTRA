@@ -12,45 +12,27 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Step 1: CPU-only PyTorch (separate index URL; avoids pulling CUDA wheels) ─
-# Install before the rest of requirements so Docker can cache this heavy layer.
+# Install before the rest of requirements so Docker caches this heavy layer.
 RUN pip install --no-cache-dir \
     torch==2.3.1 \
     torchvision==0.18.1 \
     --index-url https://download.pytorch.org/whl/cpu
 
-# ── Step 2: Everything else ────────────────────────────────────────────────────
+# ── Step 2: Everything else (skip torch/torchvision, already installed) ───────
 COPY requirements.txt .
-# torch/torchvision are already installed; skip them on the second pass.
 RUN pip install --no-cache-dir \
     $(grep -v '^#' requirements.txt | grep -v '^torch' | grep -v '^torchvision' | grep -v '^\s*$')
 
-# ── Step 3: Pre-download Grounding-DINO weights ───────────────────────────────
-# HF_HOME is set to /model-cache so the weights layer can be cached on a
-# Docker volume (mount -v vastra_model_cache:/model-cache) and survive
-# container rebuilds without re-downloading ~700 MB.
-ENV HF_HOME=/model-cache
-ENV GROUNDING_DINO_MODEL=IDEA-Research/grounding-dino-base
-
-# Download weights during build when network is available.
-# If the build runs without internet (e.g. CI), this step is skipped and
-# the model will be downloaded on first container startup instead.
-RUN python - <<'EOF' || echo "Model pre-download skipped (no network at build time)"
-import os
-os.environ.setdefault("HF_HOME", "/model-cache")
-try:
-    from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
-    model_id = os.environ["GROUNDING_DINO_MODEL"]
-    print(f"Pre-downloading {model_id} …")
-    AutoProcessor.from_pretrained(model_id)
-    AutoModelForZeroShotObjectDetection.from_pretrained(model_id)
-    print("Pre-download complete.")
-except Exception as e:
-    print(f"Pre-download failed: {e}")
-    raise
-EOF
-
 # ── Application ────────────────────────────────────────────────────────────────
 COPY app/ ./app/
+COPY tests/ ./tests/
+
+# Model weights are NOT baked into the image (keeps the image small). They are
+# downloaded on FIRST container startup into HF_HOME, which docker-compose
+# mounts to the persistent `model_cache` named volume. Subsequent container
+# recreations reuse the cached weights — no re-download.
+ENV HF_HOME=/model-cache
+ENV GROUNDING_DINO_MODEL=IDEA-Research/grounding-dino-base
 
 ENV PYTHONPATH=/app
 ENV PYTHONDONTWRITEBYTECODE=1

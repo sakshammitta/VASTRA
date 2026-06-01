@@ -1,0 +1,7 @@
+# Personal acceptance photos — don't commit by default.
+*.jpg
+*.jpeg
+*.png
+*.webp
+# Keep the docs.
+!README.md
