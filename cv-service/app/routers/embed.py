@@ -14,11 +14,14 @@ _r2 = r2_module.R2Client()
 async def embed_detections(request: EmbedRequest):
     """
     For each detection bounding box:
-    1. Crop/segment the item from the image
-    2. Run FashionCLIP → 512-dim embedding
-    3. Run K-means (k=3) in LAB color space → top 3 hex colors
-    4. Classify clothing category from FashionCLIP logits
-    Returns a full DetectedItem for each bounding box.
+    1. Crop the item (SAM segmentation when loaded, bbox crop otherwise)
+    2. Extract dominant colors via K-means in LAB space (always available)
+    3. Infer clothing category:
+       - FashionCLIP text-image similarity when loaded (accurate)
+       - Heuristic label match from Grounding-DINO label text (interim)
+    4. Compute 512-dim FashionCLIP embedding when loaded; null otherwise.
+       A null embedding is stored as NULL in the wardrobe DB — never as a
+       zero vector, which would produce misleading similarity results.
     """
     try:
         image = _r2.download_image(request.image_key)
@@ -28,11 +31,18 @@ async def embed_detections(request: EmbedRequest):
     items = []
     for detection in request.detections:
         try:
+            # Segmentation: SAM when loaded, bbox crop otherwise.
             crop = segmenter.segment_crop(image, detection.bbox)
 
-            embedding = embedder.get_embedding(crop)
+            # Colors: K-means in LAB space — always available, no ML model needed.
             colors = embedder.extract_colors(crop, k=3)
+
+            # Category: FashionCLIP similarity when loaded, label heuristic otherwise.
             category, sub_category = embedder.classify_category(crop, detection.label)
+
+            # Embedding: FashionCLIP when loaded, None otherwise.
+            # The schema and backend both accept None; it maps to NULL in pgvector.
+            embedding = embedder.get_embedding(crop)
 
             crop_key = None
             try:
@@ -49,6 +59,6 @@ async def embed_detections(request: EmbedRequest):
                 crop_key=crop_key,
             ))
         except Exception as e:
-            logger.error(f"Failed to embed detection '{detection.label}': {e}")
+            logger.error(f"Failed to process detection '{detection.label}': {e}")
 
     return EmbedResponse(items=items)

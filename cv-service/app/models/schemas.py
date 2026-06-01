@@ -62,7 +62,9 @@ class EmbedRequest(BaseModel):
 
 class DetectedItem(BaseModel):
     detection: Detection
-    embedding: list[float] = Field(..., description="512-dim FashionCLIP vector")
+    # None when FashionCLIP is not loaded — stored as NULL in pgvector column.
+    # A null embedding is explicitly absent; a zero vector would be misleading.
+    embedding: Optional[list[float]] = Field(None, description="512-dim FashionCLIP vector; null when unavailable")
     color_palette: list[str] = Field(..., description="Top-3 hex colors from K-means in LAB space")
     category: ClothingCategory
     sub_category: str = ""

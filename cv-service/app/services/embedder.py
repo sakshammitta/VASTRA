@@ -68,14 +68,16 @@ def is_loaded() -> bool:
     return _models_loaded
 
 
-def get_embedding(image: Image.Image) -> list[float]:
-    """Return 512-dim FashionCLIP embedding, or a zero vector when unavailable."""
+def get_embedding(image: Image.Image) -> list[float] | None:
+    """
+    Return 512-dim FashionCLIP embedding, or None when FashionCLIP is not loaded.
+    Callers must treat None as "embedding unavailable" and store NULL, not a
+    zero vector — a zero vector would produce misleading similarity results.
+    """
     if not _models_loaded:
         if _ALLOW_MOCK:
             return _mock_embedding()
-        # A zero vector is stored; it is distinguishable from a real embedding
-        # and will produce no meaningful similarity matches — honest behaviour.
-        return [0.0] * 512
+        return None
     try:
         embeddings = _fashion_clip_model.encode_images([image], batch_size=1)
         vec = embeddings[0]

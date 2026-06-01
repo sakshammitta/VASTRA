@@ -84,6 +84,47 @@ class TestMockGateTrue:
             assert 0.0 <= b.y_min < b.y_max <= 1.0
 
 
+class TestNullEmbeddingContract:
+    """
+    When FashionCLIP is not loaded and mock is disabled, get_embedding() must
+    return None — not a zero vector. A zero vector in pgvector produces
+    misleading similarity results.
+    """
+
+    def test_get_embedding_returns_none_without_fashionclip(self):
+        import sys
+        for key in list(sys.modules):
+            if "app.services.embedder" in key:
+                del sys.modules[key]
+        with patch.dict("os.environ", {"CV_ALLOW_MOCK": "false"}):
+            import importlib
+            import app.services.embedder as emb
+            importlib.reload(emb)
+            # Model definitely not loaded in test env
+            assert not emb.is_loaded()
+            img = Image.new("RGB", (64, 64), (200, 200, 200))
+            result = emb.get_embedding(img)
+            assert result is None, (
+                f"Expected None (null embedding), got {type(result)}. "
+                "A zero vector must not be stored in the wardrobe DB."
+            )
+
+    def test_get_embedding_returns_mock_vector_when_mock_enabled(self):
+        import sys
+        for key in list(sys.modules):
+            if "app.services.embedder" in key:
+                del sys.modules[key]
+        with patch.dict("os.environ", {"CV_ALLOW_MOCK": "true"}):
+            import importlib
+            import app.services.embedder as emb
+            importlib.reload(emb)
+            assert not emb.is_loaded()
+            img = Image.new("RGB", (64, 64), (200, 200, 200))
+            result = emb.get_embedding(img)
+            assert result is not None
+            assert len(result) == 512
+
+
 class TestHealthEndpointContract:
     """The /health response must accurately reflect mock status."""
 
@@ -108,3 +149,17 @@ class TestHealthEndpointContract:
         )
         assert r.status == "mock"
         assert r.mock_allowed is True
+
+    def test_detection_only_status(self):
+        """The detection_only status represents the current real state:
+        Grounding-DINO loaded, FashionCLIP not yet — detection works, embeddings null."""
+        from app.models.schemas import HealthResponse
+        r = HealthResponse(
+            status="detection_only",
+            mock_allowed=False,
+            models_loaded={"grounding_dino": True, "sam": False, "fashion_clip": False},
+            detail="Real detection active. Embeddings null until FashionCLIP loads.",
+        )
+        assert r.status == "detection_only"
+        assert r.models_loaded["grounding_dino"] is True
+        assert r.models_loaded["fashion_clip"] is False

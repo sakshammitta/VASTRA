@@ -98,9 +98,11 @@ public class WardrobeService {
         Map<String, Object> detected = detectedItems.get(req.itemIndex());
         String cropKey = (String) detected.get("crop_key");
 
-        // CV service stores embedding as list[float] in Redis; convert to pgvector text format.
+        // CV service stores embedding as list[float] in Redis, or null when FashionCLIP
+        // is not loaded. Convert to pgvector text format "[v1,v2,...]", or leave null
+        // so the column stores NULL rather than a misleading zero vector.
         Object rawEmbedding = detected.get("embedding");
-        String embedding = toVectorString(rawEmbedding);
+        String embedding = toVectorString(rawEmbedding);  // returns null when rawEmbedding is null
 
         List<String> colors = (List<String>) detected.getOrDefault("color_palette", List.of());
 
