@@ -74,5 +74,7 @@ class EmbedResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    status: str = "ok"
+    status: str                          # "ok" | "degraded" | "mock"
+    mock_allowed: bool
     models_loaded: dict[str, bool]
+    detail: str = ""

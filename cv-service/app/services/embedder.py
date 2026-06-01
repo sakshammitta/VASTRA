@@ -1,16 +1,15 @@
+import os
 import logging
-import io
-import base64
 import numpy as np
 from PIL import Image
-from typing import Optional
 
 from app.models.schemas import ClothingCategory
 
 logger = logging.getLogger(__name__)
 
+_ALLOW_MOCK: bool = os.getenv("CV_ALLOW_MOCK", "false").lower() == "true"
+
 _fashion_clip_model = None
-_fashion_clip_preprocess = None
 _models_loaded = False
 
 _CATEGORY_LABELS = [
@@ -24,7 +23,7 @@ _CATEGORY_LABELS = [
     "suit",
 ]
 
-_LABEL_TO_CATEGORY = {
+_LABEL_TO_CATEGORY: dict[str, ClothingCategory] = {
     "top": ClothingCategory.TOP, "shirt": ClothingCategory.TOP,
     "t-shirt": ClothingCategory.TOP, "blouse": ClothingCategory.TOP,
     "sweater": ClothingCategory.TOP, "hoodie": ClothingCategory.TOP,
@@ -44,19 +43,25 @@ _LABEL_TO_CATEGORY = {
 }
 
 
-def load_models():
-    global _fashion_clip_model, _fashion_clip_preprocess, _models_loaded
+def load_models() -> None:
+    global _fashion_clip_model, _models_loaded
     if _models_loaded:
         return
     try:
         from fashion_clip.fashion_clip import FashionCLIP
-        logger.info("Loading FashionCLIP...")
-        fc = FashionCLIP("fashion-clip")
-        _fashion_clip_model = fc
+        logger.info("Loading FashionCLIP…")
+        _fashion_clip_model = FashionCLIP("fashion-clip")
         _models_loaded = True
         logger.info("FashionCLIP loaded successfully")
-    except Exception as e:
-        logger.warning(f"Could not load FashionCLIP: {e}. Using mock embedder.")
+    except Exception as exc:
+        if _ALLOW_MOCK:
+            logger.warning(f"FashionCLIP unavailable ({exc}). Mock embeddings enabled.")
+        else:
+            logger.error(
+                f"FashionCLIP unavailable ({exc}). "
+                "CV_ALLOW_MOCK=false → heuristic category only, zero embedding."
+            )
+        _models_loaded = False
 
 
 def is_loaded() -> bool:
@@ -64,9 +69,13 @@ def is_loaded() -> bool:
 
 
 def get_embedding(image: Image.Image) -> list[float]:
-    """Return 512-dim FashionCLIP embedding for an image crop."""
+    """Return 512-dim FashionCLIP embedding, or a zero vector when unavailable."""
     if not _models_loaded:
-        return _mock_embedding()
+        if _ALLOW_MOCK:
+            return _mock_embedding()
+        # A zero vector is stored; it is distinguishable from a real embedding
+        # and will produce no meaningful similarity matches — honest behaviour.
+        return [0.0] * 512
     try:
         embeddings = _fashion_clip_model.encode_images([image], batch_size=1)
         vec = embeddings[0]
@@ -74,19 +83,18 @@ def get_embedding(image: Image.Image) -> list[float]:
         if norm > 0:
             vec = vec / norm
         return vec.tolist()
-    except Exception as e:
-        logger.error(f"FashionCLIP embedding failed: {e}")
-        return _mock_embedding()
+    except Exception as exc:
+        logger.error(f"FashionCLIP embedding failed: {exc}")
+        return [0.0] * 512
 
 
 def classify_category(image: Image.Image, detection_label: str) -> tuple[ClothingCategory, str]:
     """
-    Classify the clothing category using FashionCLIP text-image similarity.
-    Falls back to heuristic label matching.
+    Classify category via FashionCLIP text-image similarity.
+    Falls back to heuristic label matching (good enough once DINO gives real labels).
     """
     if not _models_loaded:
         return _heuristic_category(detection_label)
-
     try:
         text_embeddings = _fashion_clip_model.encode_text(_CATEGORY_LABELS, batch_size=32)
         img_embedding = np.array(get_embedding(image))
@@ -95,16 +103,13 @@ def classify_category(image: Image.Image, detection_label: str) -> tuple[Clothin
         best_label = _CATEGORY_LABELS[best_idx]
         category = _LABEL_TO_CATEGORY.get(best_label, ClothingCategory.OTHER)
         return category, best_label
-    except Exception as e:
-        logger.error(f"Category classification failed: {e}")
+    except Exception as exc:
+        logger.error(f"Category classification failed: {exc}")
         return _heuristic_category(detection_label)
 
 
 def extract_colors(image: Image.Image, k: int = 3) -> list[str]:
-    """
-    Extract top-k dominant colors using K-means in LAB color space.
-    Returns list of hex strings like ['#E8D5C4', '#2B1B0E', '#F5F0EB'].
-    """
+    """Top-k dominant colors via K-means in LAB color space."""
     try:
         from sklearn.cluster import KMeans
         from skimage import color as skcolor
@@ -123,16 +128,14 @@ def extract_colors(image: Image.Image, k: int = 3) -> list[str]:
         sorted_idx = np.argsort(-counts)
         centers_rgb = centers_rgb[sorted_idx]
 
-        return [rgb_to_hex(r, g, b) for r, g, b in centers_rgb]
-
-    except Exception as e:
-        logger.error(f"Color extraction failed: {e}")
+        return [_rgb_to_hex(r, g, b) for r, g, b in centers_rgb]
+    except Exception as exc:
+        logger.error(f"Color extraction failed: {exc}")
         return _dominant_color_fallback(image, k)
 
 
-def rgb_to_hex(r: float, g: float, b: float) -> str:
-    ri, gi, bi = int(r * 255), int(g * 255), int(b * 255)
-    return f"#{ri:02X}{gi:02X}{bi:02X}"
+def _rgb_to_hex(r: float, g: float, b: float) -> str:
+    return f"#{int(r * 255):02X}{int(g * 255):02X}{int(b * 255):02X}"
 
 
 def _dominant_color_fallback(image: Image.Image, k: int) -> list[str]:
@@ -146,6 +149,7 @@ def _dominant_color_fallback(image: Image.Image, k: int) -> list[str]:
 
 
 def _mock_embedding() -> list[float]:
+    """Fixed random vector — only used when CV_ALLOW_MOCK=true."""
     rng = np.random.default_rng(42)
     vec = rng.normal(0, 1, 512).astype(np.float32)
     vec = vec / np.linalg.norm(vec)

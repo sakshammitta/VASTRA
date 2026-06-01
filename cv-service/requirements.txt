@@ -1,17 +1,29 @@
+# ── Web framework ──────────────────────────────────────────────────────────────
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
 pydantic==2.7.4
 python-multipart==0.0.9
+
+# ── Image / numeric ────────────────────────────────────────────────────────────
 pillow==10.3.0
 numpy==1.26.4
 scikit-learn==1.5.0
 scikit-image==0.23.2
+
+# ── Storage ────────────────────────────────────────────────────────────────────
 boto3==1.34.119
 httpx==0.27.0
 
-# ML models (comment out if running without GPU for local dev)
-# torch==2.3.1
-# torchvision==0.18.1
-# transformers==4.42.3
+# ── Garment detection — Grounding-DINO ────────────────────────────────────────
+# CPU wheels; swap the index URL for a CUDA build when a GPU is available.
+torch==2.3.1
+torchvision==0.18.1
+transformers==4.42.3
+
+# ── Category + embedding — FashionCLIP ────────────────────────────────────────
+# Uncomment once Grounding-DINO milestone passes acceptance tests.
 # fashion-clip==0.2.1
+
+# ── Segmentation — SAM ────────────────────────────────────────────────────────
+# Uncomment after FashionCLIP milestone.
 # segment-anything @ git+https://github.com/facebookresearch/segment-anything.git
