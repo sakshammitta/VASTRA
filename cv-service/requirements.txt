@@ -21,9 +21,11 @@ torchvision==0.18.1
 transformers==4.42.3
 
 # ── Category + embedding — FashionCLIP ────────────────────────────────────────
-# Fashion-specific subtype classification + 512-dim embeddings. Downloads its
-# weights on first startup into HF_HOME (the model_cache volume), like DINO.
-fashion-clip==0.2.1
+# Loaded via transformers' CLIPModel using the published HuggingFace weights
+# (patrickjohncyh/fashion-clip). We deliberately do NOT use the `fashion-clip`
+# PyPI package — its sdist fails to build under modern pip (missing
+# pkg_resources build dep). transformers (above) is all that's required;
+# weights download to HF_HOME (model_cache volume) on first startup.
 
 # ── Segmentation — SAM ────────────────────────────────────────────────────────
 # Uncomment after FashionCLIP milestone.

@@ -37,8 +37,8 @@ def main(path: str) -> int:
     if not embedder.is_loaded():
         print(
             "\nℹ  FashionCLIP NOT loaded — subtype is inferred from the DINO\n"
-            "   label (unverified). Build/run with fashion-clip for real subtype\n"
-            "   classification.\n"
+            "   label (unverified). FashionCLIP loads via transformers' CLIP\n"
+            "   from patrickjohncyh/fashion-clip on first startup.\n"
         )
 
     from app.services import segmenter

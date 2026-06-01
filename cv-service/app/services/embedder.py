@@ -9,7 +9,15 @@ logger = logging.getLogger(__name__)
 
 _ALLOW_MOCK: bool = os.getenv("CV_ALLOW_MOCK", "false").lower() == "true"
 
-_fashion_clip_model = None
+# FashionCLIP is loaded via the standard transformers CLIP API using the
+# published HuggingFace weights, NOT the fragile `fashion-clip` PyPI package
+# (whose sdist fails to build under modern pip). Weights download to HF_HOME
+# (the model_cache volume) on first startup, like Grounding-DINO.
+_FASHION_CLIP_MODEL_ID = os.getenv("FASHION_CLIP_MODEL", "patrickjohncyh/fashion-clip")
+
+_clip_model = None
+_clip_processor = None
+_clip_device = "cpu"
 _models_loaded = False
 
 # ── Controlled fashion subtype taxonomy ───────────────────────────────────────
@@ -53,13 +61,18 @@ _subtype_text_embeddings = None
 
 
 def load_models() -> None:
-    global _fashion_clip_model, _models_loaded
+    global _clip_model, _clip_processor, _clip_device, _models_loaded
     if _models_loaded:
         return
     try:
-        from fashion_clip.fashion_clip import FashionCLIP
-        logger.info("Loading FashionCLIP…")
-        _fashion_clip_model = FashionCLIP("fashion-clip")
+        from transformers import CLIPModel, CLIPProcessor
+        import torch
+
+        _clip_device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info(f"Loading FashionCLIP ({_FASHION_CLIP_MODEL_ID}) on {_clip_device}…")
+        _clip_model = CLIPModel.from_pretrained(_FASHION_CLIP_MODEL_ID).to(_clip_device)
+        _clip_model.eval()
+        _clip_processor = CLIPProcessor.from_pretrained(_FASHION_CLIP_MODEL_ID)
         _models_loaded = True
         logger.info("FashionCLIP loaded successfully")
     except Exception as exc:
@@ -78,12 +91,16 @@ def is_loaded() -> bool:
 
 
 def _subtype_texts() -> np.ndarray:
-    """Lazily compute + cache FashionCLIP text embeddings for the taxonomy."""
+    """Lazily compute + cache normalized FashionCLIP text embeddings for the taxonomy."""
     global _subtype_text_embeddings
     if _subtype_text_embeddings is None:
-        embs = _fashion_clip_model.encode_text(_SUBTYPE_PROMPTS, batch_size=32)
-        embs = np.asarray(embs, dtype=np.float32)
-        # L2-normalize for cosine similarity
+        import torch
+        inputs = _clip_processor(
+            text=_SUBTYPE_PROMPTS, return_tensors="pt", padding=True
+        ).to(_clip_device)
+        with torch.no_grad():
+            feats = _clip_model.get_text_features(**inputs)
+        embs = feats.cpu().numpy().astype(np.float32)
         norms = np.linalg.norm(embs, axis=1, keepdims=True)
         _subtype_text_embeddings = embs / np.clip(norms, 1e-8, None)
     return _subtype_text_embeddings
@@ -100,8 +117,11 @@ def get_embedding(image: Image.Image) -> list[float] | None:
             return _mock_embedding()
         return None
     try:
-        embeddings = _fashion_clip_model.encode_images([image], batch_size=1)
-        vec = np.asarray(embeddings[0], dtype=np.float32)
+        import torch
+        inputs = _clip_processor(images=image, return_tensors="pt").to(_clip_device)
+        with torch.no_grad():
+            feats = _clip_model.get_image_features(**inputs)
+        vec = feats[0].cpu().numpy().astype(np.float32)
         norm = np.linalg.norm(vec)
         if norm > 0:
             vec = vec / norm
