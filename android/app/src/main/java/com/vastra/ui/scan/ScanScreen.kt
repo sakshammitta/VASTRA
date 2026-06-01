@@ -43,10 +43,9 @@ fun ScanScreen(
     val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let {
-            viewModel.scanImage(uri.toTempFile(context))
-            onBack()
-        }
+        // Stay on screen — the scanning overlay appears, then the selection sheet,
+        // and onBack is called only after confirmation/dismissal below.
+        uri?.let { viewModel.scanImage(uri.toTempFile(context)) }
     }
 
     Box(
@@ -241,6 +240,25 @@ fun ScanScreen(
                     }
                 }
             }
+        }
+
+        // ── Detected-items selection sheet ──────────────────────────────────
+        // Shown after scan completes; navigates back to Wardrobe after confirm/dismiss.
+        uiState.pendingConfirmJob?.let { job ->
+            com.vastra.ui.wardrobe.ScanResultSelectionSheet(
+                detectedItems = job.detectedItems,
+                selectedIndices = uiState.selectedDetectedIndices,
+                isConfirming = uiState.isConfirming,
+                onToggle = { viewModel.toggleDetectedItem(it) },
+                onConfirm = {
+                    viewModel.confirmSelectedItems()
+                    onBack()
+                },
+                onDismiss = {
+                    viewModel.dismissScanResult()
+                    onBack()
+                }
+            )
         }
 
         // ── Error snackbar ───────────────────────────────────────────────────

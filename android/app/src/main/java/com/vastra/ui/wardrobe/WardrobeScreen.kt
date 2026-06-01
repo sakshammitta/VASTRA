@@ -2,6 +2,11 @@ package com.vastra.ui.wardrobe
 
 import android.content.Context
 import android.net.Uri
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -539,10 +544,7 @@ fun EmptyWardrobeState(onScan: () -> Unit) {
 fun WardrobeItemSkeleton() {
     val alpha by rememberInfiniteTransition(label = "shimmer").animateFloat(
         0.3f, 0.7f,
-        androidx.compose.animation.core.infiniteRepeatable(
-            androidx.compose.animation.core.tween(900),
-            androidx.compose.animation.core.RepeatMode.Reverse
-        ),
+        infiniteRepeatable(tween(900), RepeatMode.Reverse),
         label = "shimmer"
     )
     Card(
