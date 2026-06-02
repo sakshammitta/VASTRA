@@ -47,6 +47,46 @@ Same worn outfit photo returns:
   - Isolated flat-lay jeans result from previous session still passes
     (no regression on single-item photos)
 
+## Investigation progress (2026-06-02)
+
+### Finding 1 — prompt, not threshold
+/scan/diagnose on the gym-selfie outfit photo returned:
+  - production@0.35 → 0 detections
+  - production@0.25 → 0 detections
+  - worn-outfit@0.25 → 5 detections (shirt 0.33, jeans 0.31, trousers 0.30,
+    shirt/hoodie 0.27, hoodie/jacket 0.25)
+Conclusion: the production prompt wording is the cause of "0 items", not the
+threshold. The worn-outfit prompt ("<garment> worn by person") detects garments.
+
+### Finding 2 — the 3 extra detections are background, not duplicates
+/scan/diagnose/worn crop inspection on the same photo:
+  - #0 shirt → FashionCLIP shirt, area=0.091  → REAL (white top)       KEEP
+  - #2 trousers → FashionCLIP trousers, area=0.083 → REAL (olive bottom) KEEP
+  - #1 → sneakers, area=0.003  → background fragment (gym/mirror)        REJECT
+  - #3 → shirt,    area=0.005  → background fragment                     REJECT
+  - #4 → hoodie,   area=0.002  → background fragment                     REJECT
+The noise comes from other people / mirror reflections in the gym, NOT
+duplicate boxes over the user's own clothes. So the fix is main-SUBJECT
+association, not just NMS.
+
+### Candidate fix under test — main-subject filter
+POST /scan/diagnose/subject (experimental, read-only):
+  1. worn-outfit garment prompt (box=0.25)
+  2. person prompt → largest person box = primary subject
+  3. keep garment iff area >= 0.02 AND >=55% contained in primary-person box
+  4. FashionCLIP on kept garments only
+  5. before/after annotated images
+Tunables: _MIN_GARMENT_AREA=0.02, _MIN_CONTAINMENT=0.55 in scan.py.
+
+## Acceptance bar
+Same worn outfit photo returns:
+  - ≥1 TOP detection (any of: shirt/t-shirt/blouse/sweater/hoodie)
+  - ≥1 BOTTOM detection (any of: jeans/trousers/pants/shorts/skirt)
+  - No spurious garment detections covering the face/background/skin
+  - Specifically: the 3 background fragments above must be REJECTED
+  - Isolated flat-lay jeans result from previous session still passes
+    (no regression on single-item photos)
+
 ## Relationship to other baselines
 - tests/baselines/jeans_with_crocs.md: secondary failure (footwear taxonomy)
   Do NOT address crocs/footwear until this baseline passes.

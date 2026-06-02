@@ -530,6 +530,237 @@ async def diagnose_worn_outfit(file: UploadFile = File(...)):
     )
 
 
+class SubjectFilterDetection(BaseModel):
+    index: int
+    dino_label: str
+    dino_conf: float
+    bbox: dict
+    area_fraction: float
+    # Fraction of THIS garment box that lies inside the primary-person box
+    containment_in_subject: float
+    fashionclip_category: str = ""
+    fashionclip_subtype: str = ""
+    fashionclip_conf: float = 0.0
+    kept: bool = False
+    reject_reason: str = ""           # "" when kept; else "fragment" / "outside-subject" / "no-subject"
+
+
+class SubjectFilterResponse(BaseModel):
+    image_width: int
+    image_height: int
+    garment_prompt: str
+    person_prompt: str
+    box_threshold: float
+    # The chosen primary-person bbox (largest by area), or null if none found
+    primary_subject_bbox: Optional[dict] = None
+    primary_subject_area: float = 0.0
+    detections: list[SubjectFilterDetection]
+    kept_indices: list[int]
+    annotated_before_b64: str         # all raw garment boxes
+    annotated_after_b64: str          # only kept boxes + subject box
+    summary: str
+
+
+# Prompt to locate the primary human subject of the photo.
+_PERSON_PROMPT = "person . man . woman"
+
+# Minimum garment-box area (fraction of image) to be considered a real garment,
+# not a tiny background fragment. The two real garments in the gym selfie were
+# ~0.083–0.091; the rejected background fragments were 0.002–0.005.
+_MIN_GARMENT_AREA = 0.02
+# Minimum fraction of a garment box that must lie inside the primary-person box.
+_MIN_CONTAINMENT = 0.55
+
+
+@router.post("/diagnose/subject", response_model=SubjectFilterResponse)
+async def diagnose_subject_filter(file: UploadFile = File(...)):
+    """
+    READ-ONLY. Experimental main-subject garment filter for worn-outfit photos.
+
+    Pipeline:
+      1. DINO with the worn-outfit garment prompt (box=0.25) → candidate garments
+      2. DINO with a person prompt → choose the LARGEST person box as the primary
+         subject (the person taking the selfie / standing in front)
+      3. Keep a garment only if:
+           - its area >= _MIN_GARMENT_AREA (drops tiny background fragments), AND
+           - >= _MIN_CONTAINMENT of its box lies inside the primary-person box
+             (drops clothing on other people / mirror reflections / background)
+      4. Run FashionCLIP only on the KEPT garments
+      5. Return before/after annotated images so the filter can be verified
+
+    Nothing is persisted. No R2/Redis/Postgres writes. Production pipeline is
+    NOT changed by calling this.
+
+    Example:
+        curl -s -X POST http://localhost:8000/scan/diagnose/subject \\
+             -F "file=@outfit.jpg" > subject_result.json
+        python3 tests/extract_subject_filter.py subject_result.json ./out/
+    """
+    import base64
+    from PIL import ImageDraw
+    from app.services.detector import (
+        _grounding_dino_model as _dino_model,
+        _grounding_dino_processor as _dino_proc,
+        resize_for_inference, _DINO_MAX_SIDE,
+    )
+    from app.models.schemas import BoundingBox
+
+    try:
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
+
+    if not detector.is_loaded():
+        raise HTTPException(status_code=503, detail="Grounding-DINO model not loaded")
+
+    import torch
+    BOX_T, TEXT_T = 0.25, 0.20
+    inf_img = resize_for_inference(image, _DINO_MAX_SIDE)
+    device = next(_dino_model.parameters()).device
+    iw, ih = inf_img.size
+    full_w, full_h = image.size
+
+    def _run(prompt: str, box_t: float, text_t: float) -> list[dict]:
+        inputs = _dino_proc(images=inf_img, text=prompt, return_tensors="pt").to(device)
+        t0 = time.perf_counter()
+        with torch.no_grad():
+            outputs = _dino_model(**inputs)
+        logger.info(f"timing subject-filter-forward: {(time.perf_counter()-t0)*1000:.0f}ms  '{prompt[:30]}'")
+        results = _dino_proc.post_process_grounded_object_detection(
+            outputs, inputs.input_ids,
+            box_threshold=box_t, text_threshold=text_t,
+            target_sizes=[inf_img.size[::-1]],
+        )[0]
+        out = []
+        for box, score, label in zip(results["boxes"], results["scores"], results["labels"]):
+            x1, y1, x2, y2 = box.tolist()
+            out.append({
+                "label": str(label).strip(), "conf": round(float(score), 4),
+                "x_min": round(max(0.0, x1/iw), 4), "y_min": round(max(0.0, y1/ih), 4),
+                "x_max": round(min(1.0, x2/iw), 4), "y_max": round(min(1.0, y2/ih), 4),
+            })
+        out.sort(key=lambda d: d["conf"], reverse=True)
+        return out
+
+    def _area(b: dict) -> float:
+        return max(0.0, b["x_max"]-b["x_min"]) * max(0.0, b["y_max"]-b["y_min"])
+
+    def _containment(garment: dict, person: dict) -> float:
+        """Fraction of *garment* area that lies inside *person*."""
+        ix1 = max(garment["x_min"], person["x_min"]); iy1 = max(garment["y_min"], person["y_min"])
+        ix2 = min(garment["x_max"], person["x_max"]); iy2 = min(garment["y_max"], person["y_max"])
+        inter = max(0.0, ix2-ix1) * max(0.0, iy2-iy1)
+        ga = _area(garment)
+        return inter / ga if ga > 0 else 0.0
+
+    # ── 1. Garment candidates ─────────────────────────────────────────────────
+    garments = _run(_WORN_OUTFIT_PROMPT, BOX_T, TEXT_T)
+
+    # ── 2. Primary subject: largest person box ────────────────────────────────
+    persons = _run(_PERSON_PROMPT, 0.30, 0.25)
+    primary = max(persons, key=_area) if persons else None
+
+    # ── 3. Filter ─────────────────────────────────────────────────────────────
+    detections: list[SubjectFilterDetection] = []
+    kept_raw: list[dict] = []
+    for idx, g in enumerate(garments):
+        area = round(_area(g), 4)
+        contain = round(_containment(g, primary), 4) if primary else 0.0
+
+        if area < _MIN_GARMENT_AREA:
+            kept, reason = False, "fragment"
+        elif primary is None:
+            kept, reason = False, "no-subject"
+        elif contain < _MIN_CONTAINMENT:
+            kept, reason = False, "outside-subject"
+        else:
+            kept, reason = True, ""
+
+        det = SubjectFilterDetection(
+            index=idx, dino_label=g["label"], dino_conf=g["conf"],
+            bbox={k: g[k] for k in ("x_min", "y_min", "x_max", "y_max")},
+            area_fraction=area, containment_in_subject=contain,
+            kept=kept, reject_reason=reason,
+        )
+        if kept:
+            kept_raw.append(g)
+        detections.append(det)
+
+    # ── 4. FashionCLIP on kept garments only ──────────────────────────────────
+    for det in detections:
+        if not det.kept:
+            continue
+        bbox = BoundingBox(**det.bbox)
+        crop = segmenter.segment_crop(image, bbox)
+        if embedder.is_loaded():
+            cat, sub, conf = embedder.classify_subtype(crop, det.dino_label)
+            det.fashionclip_category = cat.value
+            det.fashionclip_subtype = sub
+            det.fashionclip_conf = round(conf, 4)
+        else:
+            det.fashionclip_category = "UNKNOWN"
+            det.fashionclip_subtype = det.dino_label
+            det.fashionclip_conf = 0.0
+
+    # ── 5. Before/after annotated images ──────────────────────────────────────
+    def _annotate(raw_boxes: list[dict], dets: list, draw_subject: bool) -> str:
+        img = image.copy()
+        d = ImageDraw.Draw(img)
+        if draw_subject and primary is not None:
+            px1 = int(primary["x_min"]*full_w); py1 = int(primary["y_min"]*full_h)
+            px2 = int(primary["x_max"]*full_w); py2 = int(primary["y_max"]*full_h)
+            d.rectangle([px1, py1, px2, py2], outline="#FFD000", width=3)
+            d.text((px1+2, py1+2), "PRIMARY SUBJECT", fill="#FFD000")
+        for idx, g in enumerate(raw_boxes):
+            x1 = int(g["x_min"]*full_w); y1 = int(g["y_min"]*full_h)
+            x2 = int(g["x_max"]*full_w); y2 = int(g["y_max"]*full_h)
+            det = dets[idx] if idx < len(dets) else None
+            kept = det.kept if det else True
+            color = "#00CC44" if kept else "#FF3300"
+            d.rectangle([x1, y1, x2, y2], outline=color, width=4 if kept else 2)
+            if det:
+                tag = (f"#{idx} {det.fashionclip_subtype or det.dino_label[:14]} "
+                       f"{'KEEP' if kept else det.reject_reason}")
+                d.rectangle([x1, max(0, y1-16), x1+len(tag)*7, y1], fill=color)
+                d.text((x1+2, max(0, y1-15)), tag, fill="white")
+        buf = io.BytesIO(); img.save(buf, format="JPEG", quality=85)
+        return base64.b64encode(buf.getvalue()).decode()
+
+    before_b64 = _annotate(garments, detections, draw_subject=True)
+    after_b64 = _annotate(kept_raw,
+                          [d for d in detections if d.kept],
+                          draw_subject=True)
+
+    kept_indices = [d.index for d in detections if d.kept]
+    kept_desc = ", ".join(
+        f"#{d.index} {d.fashionclip_category}/{d.fashionclip_subtype}({d.fashionclip_conf:.2f})"
+        for d in detections if d.kept
+    ) or "none"
+    summary = (
+        f"{len(garments)} garment candidates → {len(kept_indices)} kept after subject filter. "
+        f"Primary subject: {'found' if primary else 'NOT FOUND'}. "
+        f"Kept: {kept_desc}. "
+        f"Rejected: {len(garments)-len(kept_indices)} "
+        f"({sum(1 for d in detections if d.reject_reason=='fragment')} fragments, "
+        f"{sum(1 for d in detections if d.reject_reason=='outside-subject')} outside-subject)."
+    )
+
+    return SubjectFilterResponse(
+        image_width=image.width, image_height=image.height,
+        garment_prompt=_WORN_OUTFIT_PROMPT, person_prompt=_PERSON_PROMPT,
+        box_threshold=BOX_T,
+        primary_subject_bbox=({k: primary[k] for k in ("x_min","y_min","x_max","y_max")}
+                              if primary else None),
+        primary_subject_area=round(_area(primary), 4) if primary else 0.0,
+        detections=detections,
+        kept_indices=kept_indices,
+        annotated_before_b64=before_b64,
+        annotated_after_b64=after_b64,
+        summary=summary,
+    )
+
+
 @router.post("/upload", response_model=ScanResponse)
 async def scan_uploaded_image(file: UploadFile = File(...)):
     """
