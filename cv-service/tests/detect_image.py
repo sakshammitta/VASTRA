@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-Run Grounding-DINO garment detection on a single local image and print the
-result. This NEVER touches R2 or the wardrobe database — it only loads the
-model and prints what it sees, so you can verify recognition on a real photo
-without saving anything.
+Run Grounding-DINO + FashionCLIP garment detection on a single local image.
+Loads both models in-process so results are identical to what the API produces.
+This NEVER touches R2 or the wardrobe database.
 
 Usage (inside the running container):
     docker cp shirt.jpeg vastra-cv:/tmp/shirt.jpeg
@@ -11,6 +10,11 @@ Usage (inside the running container):
 
 Or locally (once torch + transformers are installed):
     python tests/detect_image.py path/to/shirt.jpeg
+
+Exit codes:
+    0  — success (FashionCLIP classified every detection)
+    1  — FashionCLIP failed to load; script refuses to fall back silently
+    2  — bad usage
 """
 import sys
 from PIL import Image
@@ -22,7 +26,9 @@ def main(path: str) -> int:
     print(f"Loading image: {path}")
     image = Image.open(path).convert("RGB")
 
+    # ── Load Grounding-DINO ────────────────────────────────────────────────────
     if not detector.is_loaded():
+        print("Loading Grounding-DINO…")
         detector.load_models()
 
     if not detector.is_loaded():
@@ -32,18 +38,31 @@ def main(path: str) -> int:
             "   Build/run the Docker CV service so the model is available."
         )
 
-    detections = detector.detect_clothing(image)
+    # ── Load FashionCLIP — REQUIRED; exit 1 if unavailable ────────────────────
+    if not embedder.is_loaded():
+        print("Loading FashionCLIP…")
+        embedder.load_models()
 
     if not embedder.is_loaded():
         print(
-            "\nℹ  FashionCLIP NOT loaded — subtype is inferred from the DINO\n"
-            "   label (unverified). FashionCLIP loads via transformers' CLIP\n"
-            "   from patrickjohncyh/fashion-clip on first startup.\n"
+            "\n✗  FashionCLIP FAILED TO LOAD.\n"
+            "   Subtype classification would fall back to the unverified DINO label.\n"
+            "   This script refuses to silently produce label-fallback results.\n"
+            "   Check model weights in HF_HOME / model_cache and run:\n"
+            "     docker exec vastra-cv curl -s http://localhost:8001/health\n"
+            "   to confirm fashion_clip=true in the running service.",
+            file=sys.stderr,
         )
+        return 1
+
+    print("FashionCLIP loaded — all subtypes will be verified by image-text similarity.\n")
+
+    # ── Detect ─────────────────────────────────────────────────────────────────
+    detections = detector.detect_clothing(image)
 
     from app.services import segmenter
 
-    print(f"\n{'='*60}")
+    print(f"{'='*60}")
     print(f"Detections: {len(detections)}")
     print(f"{'='*60}")
 
@@ -52,7 +71,11 @@ def main(path: str) -> int:
         crop = segmenter.segment_crop(image, d.bbox)
         cat, sub, conf = embedder.classify_subtype(crop, d.label)
         categories.append(cat.value)
-        verified = "FashionCLIP" if conf > 0 else "label-fallback"
+        if conf <= 0.0:
+            # Should never happen now that FashionCLIP is confirmed loaded above.
+            verified = "⚠ label-fallback (FashionCLIP path unexpectedly failed)"
+        else:
+            verified = "FashionCLIP ✓"
         print(
             f"  [{i}] dino_label='{d.label}'  dino_conf={d.confidence:.2f}\n"
             f"       → subtype='{sub}'  category={cat.value}  "
