@@ -284,7 +284,7 @@ fun ScanScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
                 containerColor = VastraInk,
                 contentColor = VastraCream,
-                actionColor = VastraCream,
+                actionContentColor = VastraCream,
                 action = {
                     TextButton(onClick = { viewModel.clearError() }) {
                         Text("Dismiss", color = VastraCream, fontWeight = FontWeight.SemiBold)
