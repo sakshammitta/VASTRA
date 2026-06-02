@@ -285,9 +285,10 @@ fun ScanResultSelectionSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp)
         ) {
+            // ── Fixed header ────────────────────────────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -296,7 +297,7 @@ fun ScanResultSelectionSheet(
                 Column {
                     Text("Review detected items", style = MaterialTheme.typography.titleLarge, color = VastraInk)
                     Text(
-                        "Check the type and fix it if it's wrong before saving",
+                        "${detectedItems.size} piece${if (detectedItems.size == 1) "" else "s"} found · fix any wrong labels before saving",
                         style = MaterialTheme.typography.bodySmall,
                         color = VastraMutedText
                     )
@@ -308,22 +309,30 @@ fun ScanResultSelectionSheet(
 
             Spacer(Modifier.height(12.dp))
 
-            detectedItems.forEachIndexed { index, item ->
-                DetectedItemRow(
-                    item = item,
-                    isSelected = index in selectedIndices,
-                    category = editedCategories[index] ?: item.category,
-                    subCategory = editedSubcategories[index] ?: item.subCategory,
-                    onToggle = { onToggle(index) },
-                    onCategoryChange = { onCategoryChange(index, it) },
-                    onSubcategoryChange = { onSubcategoryChange(index, it) }
-                )
-                if (index < detectedItems.lastIndex) {
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = VastraBorderColor)
+            // ── Scrollable item list ─────────────────────────────────────────
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                detectedItems.forEachIndexed { index, item ->
+                    DetectedItemRow(
+                        item = item,
+                        isSelected = index in selectedIndices,
+                        category = editedCategories[index] ?: item.category,
+                        subCategory = editedSubcategories[index] ?: item.subCategory,
+                        onToggle = { onToggle(index) },
+                        onCategoryChange = { onCategoryChange(index, it) },
+                        onSubcategoryChange = { onSubcategoryChange(index, it) }
+                    )
+                    if (index < detectedItems.lastIndex) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = VastraBorderColor)
+                    }
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            // ── Pinned confirm button ────────────────────────────────────────
+            Spacer(Modifier.height(16.dp))
 
             val count = selectedIndices.size
             Button(
@@ -344,6 +353,8 @@ fun ScanResultSelectionSheet(
                     )
                 }
             }
+
+            Spacer(Modifier.height(24.dp))
         }
     }
 }

@@ -104,7 +104,7 @@ fun ScanScreen(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Take or upload a photo of a clothing item to add it to your digital wardrobe.",
+                    "Upload an outfit photo — we'll identify each piece in your look.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = VastraMutedText
                 )
@@ -144,14 +144,14 @@ fun ScanScreen(
                         shape = RoundedCornerShape(20.dp)
                     ) {
                         Text(
-                            "FRAME ONE PIECE",
+                            "OUTFIT OR SINGLE ITEM",
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                             style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.5.sp),
                             color = VastraMutedText
                         )
                     }
                     Text(
-                        "Lay flat or hang the item\nagainst a plain background",
+                        "Works with full outfits, flat lays,\nor a single piece on its own",
                         style = MaterialTheme.typography.bodySmall,
                         color = VastraMutedText,
                         textAlign = TextAlign.Center
@@ -274,8 +274,8 @@ fun ScanScreen(
                         color = VastraMutedText
                     )
                     QuickTip(icon = Icons.Outlined.WbSunny, text = "Use natural lighting for best results")
-                    QuickTip(icon = Icons.Outlined.Straighten, text = "Lay flat or hang against a plain wall")
-                    QuickTip(icon = Icons.Outlined.CropFree, text = "Frame one item at a time")
+                    QuickTip(icon = Icons.Outlined.Straighten, text = "Flat lay, hanger, or worn — all work")
+                    QuickTip(icon = Icons.Outlined.CropFree, text = "Include the full garment in the frame")
                     QuickTip(icon = Icons.Outlined.HighQuality, text = "Higher resolution = better detection")
                 }
             }
