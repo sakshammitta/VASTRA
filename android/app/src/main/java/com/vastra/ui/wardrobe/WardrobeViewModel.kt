@@ -36,7 +36,10 @@ data class WardrobeUiState(
     // User-edited category/subcategory per detected-item index (overrides CV guess)
     val editedCategories: Map<Int, ClothingCategory> = emptyMap(),
     val editedSubcategories: Map<Int, String> = emptyMap(),
-    val isConfirming: Boolean = false
+    val isConfirming: Boolean = false,
+    // Temporary on-screen scan-flow trace (visible debug panel on the Scan screen).
+    val scanStatus: String? = null,
+    val scanDebug: String? = null
 )
 
 @HiltViewModel
@@ -73,26 +76,45 @@ class WardrobeViewModel @Inject constructor(
             "scanImage() called: ${imageFile.absolutePath} exists=${imageFile.exists()} size=${imageFile.length()}B"
         )
         viewModelScope.launch {
-            _uiState.update { it.copy(showAddSheet = false) }
+            _uiState.update {
+                it.copy(
+                    showAddSheet = false,
+                    error = null,
+                    scanStatus = "Preparing upload file",
+                    scanDebug = "file=${imageFile.name} size=${imageFile.length()}B"
+                )
+            }
             if (!imageFile.exists() || imageFile.length() == 0L) {
-                _uiState.update { it.copy(error = "Selected image is empty or unreadable (size=${imageFile.length()}B). Try another photo.") }
+                setScanError(
+                    "Detection failed: selected image is empty or unreadable",
+                    "exists=${imageFile.exists()} size=${imageFile.length()}B path=${imageFile.absolutePath}"
+                )
                 return@launch
             }
+            _uiState.update { it.copy(scanStatus = "Uploading to backend") }
             when (val result = repo.scanItem(imageFile)) {
                 is ApiResult.Success -> {
                     android.util.Log.d("VastraScan", "scanImage: job started jobId=${result.data.jobId}")
+                    _uiState.update {
+                        it.copy(scanStatus = "Scan job started", scanDebug = "jobId=${result.data.jobId}")
+                    }
                     pollScanJob(result.data.jobId)
                 }
                 is ApiResult.Error -> {
                     android.util.Log.e("VastraScan", "scanImage error: ${result.message}")
-                    _uiState.update { it.copy(error = result.message) }
+                    setScanError("Detection failed", result.message)
                 }
             }
         }
     }
 
+    private fun setScanError(status: String, debug: String?) {
+        _uiState.update { it.copy(scanStatus = status, scanDebug = debug, error = "$status: ${debug ?: ""}") }
+    }
+
     private fun pollScanJob(jobId: String) {
         viewModelScope.launch {
+            _uiState.update { it.copy(scanStatus = "Waiting for detection") }
             var attempts = 0
             while (attempts < 30) {
                 delay(2000)
@@ -100,7 +122,10 @@ class WardrobeViewModel @Inject constructor(
                     is ApiResult.Success -> {
                         val job = result.data
                         _uiState.update { state ->
-                            state.copy(activeScanJobs = state.activeScanJobs + (jobId to job))
+                            state.copy(
+                                activeScanJobs = state.activeScanJobs + (jobId to job),
+                                scanStatus = "Waiting for detection (${job.status}, ${attempts + 1})"
+                            )
                         }
                         when (job.status) {
                             ScanStatus.COMPLETE -> {
@@ -117,17 +142,17 @@ class WardrobeViewModel @Inject constructor(
                                         pendingJobId = jobId,
                                         selectedDetectedIndices = allIndices,
                                         editedCategories = seedCats,
-                                        editedSubcategories = seedSubs
+                                        editedSubcategories = seedSubs,
+                                        scanStatus = "Detected ${job.detectedItems.size} item(s)",
+                                        scanDebug = job.detectedItems.joinToString { "${it.category}/${it.subCategory}" }
                                     )
                                 }
                                 return@launch
                             }
                             ScanStatus.FAILED -> {
+                                setScanError("Detection failed", job.errorMessage ?: "Scan failed")
                                 _uiState.update { state ->
-                                    state.copy(
-                                        activeScanJobs = state.activeScanJobs - jobId,
-                                        error = job.errorMessage ?: "Scan failed"
-                                    )
+                                    state.copy(activeScanJobs = state.activeScanJobs - jobId)
                                 }
                                 return@launch
                             }
@@ -135,15 +160,14 @@ class WardrobeViewModel @Inject constructor(
                         }
                     }
                     is ApiResult.Error -> {
-                        _uiState.update { it.copy(error = result.message) }
+                        setScanError("Detection failed (poll)", result.message)
                         return@launch
                     }
                 }
                 attempts++
             }
-            _uiState.update { state ->
-                state.copy(activeScanJobs = state.activeScanJobs - jobId, error = "Scan timed out")
-            }
+            setScanError("Detection failed", "Scan timed out after $attempts polls")
+            _uiState.update { state -> state.copy(activeScanJobs = state.activeScanJobs - jobId) }
         }
     }
 
@@ -219,8 +243,13 @@ class WardrobeViewModel @Inject constructor(
         }
     }
 
-    /** Surface a client-side error (e.g. failed image read) in the same snackbar. */
-    fun reportScanError(message: String) = _uiState.update { it.copy(error = message) }
+    /** Surface a client-side error (e.g. failed image read) in the visible panel. */
+    fun reportScanError(message: String) =
+        _uiState.update { it.copy(error = message, scanStatus = "Detection failed", scanDebug = message) }
+
+    /** Update the visible scan-flow status panel (temporary debug aid). */
+    fun reportScanStatus(status: String, debug: String? = null) =
+        _uiState.update { it.copy(scanStatus = status, scanDebug = debug, error = null) }
 
     fun clearError() = _uiState.update { it.copy(error = null) }
 }

@@ -50,6 +50,7 @@ fun ScanScreen(
             android.util.Log.d("VastraScan", "gallery picker returned null Uri (user cancelled)")
         } else {
             android.util.Log.d("VastraScan", "gallery picker returned uri=$uri")
+            viewModel.reportScanStatus("Image selected", "uri=$uri")
             runCatching { uri.toTempFile(context) }
                 .onSuccess { viewModel.scanImage(it) }
                 .onFailure { e ->
@@ -202,6 +203,47 @@ fun ScanScreen(
                 }
             }
 
+            // ── Temporary visible scan-flow debug panel ─────────────────────
+            // Shows the live status + full error text directly on the phone so
+            // testing doesn't depend on Logcat. Remove once the flow is verified.
+            if (uiState.scanStatus != null || uiState.error != null) {
+                Spacer(Modifier.height(16.dp))
+                val isError = uiState.error != null
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.White,
+                    border = BorderStroke(2.dp, if (isError) Color(0xFFD32F2F) else VastraInk)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "SCAN DEBUG",
+                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.5.sp),
+                            color = if (isError) Color(0xFFD32F2F) else VastraInk,
+                            fontWeight = FontWeight.Bold
+                        )
+                        uiState.scanStatus?.let {
+                            Text("Status: $it", style = MaterialTheme.typography.bodyMedium, color = Color.Black)
+                        }
+                        uiState.scanDebug?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = Color.DarkGray)
+                        }
+                        if (isError) {
+                            Text(
+                                uiState.error!!,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFD32F2F)
+                            )
+                            TextButton(onClick = { viewModel.clearError() }) {
+                                Text("Dismiss", color = Color(0xFFD32F2F), fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(24.dp))
 
             // ── Quick Tips panel ────────────────────────────────────────────
@@ -276,24 +318,9 @@ fun ScanScreen(
             )
         }
 
-        // ── Error snackbar ───────────────────────────────────────────────────
-        // Explicit high-contrast colors so the message is always readable
-        // (the default container/content pairing rendered the text invisibly).
-        uiState.error?.let { msg ->
-            Snackbar(
-                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
-                containerColor = VastraInk,
-                contentColor = VastraCream,
-                actionContentColor = VastraCream,
-                action = {
-                    TextButton(onClick = { viewModel.clearError() }) {
-                        Text("Dismiss", color = VastraCream, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            ) {
-                Text(msg, color = VastraCream)
-            }
-        }
+        // Errors are now shown in the always-visible SCAN DEBUG panel above
+        // (inline below the Gallery button), not a snackbar — the snackbar
+        // rendered blank on-device and was easy to miss.
     }
 }
 
