@@ -36,6 +36,7 @@ import com.vastra.ui.wardrobe.toTempFile
 fun ScanScreen(
     onBack: () -> Unit,
     onFinishToWardrobe: () -> Unit = onBack,
+    onSessionExpired: () -> Unit = {},
     viewModel: WardrobeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -236,8 +237,19 @@ fun ScanScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(0xFFD32F2F)
                             )
-                            TextButton(onClick = { viewModel.clearError() }) {
-                                Text("Dismiss", color = Color(0xFFD32F2F), fontWeight = FontWeight.SemiBold)
+                            if (uiState.sessionExpired) {
+                                Button(
+                                    onClick = { viewModel.clearError(); onSessionExpired() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = VastraInk)
+                                ) {
+                                    Text("Sign in again", color = VastraCream, fontWeight = FontWeight.SemiBold)
+                                }
+                            } else {
+                                TextButton(onClick = { viewModel.clearError() }) {
+                                    Text("Dismiss", color = Color(0xFFD32F2F), fontWeight = FontWeight.SemiBold)
+                                }
                             }
                         }
                     }

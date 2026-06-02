@@ -128,7 +128,10 @@ fun MainScreen(onLogout: () -> Unit) {
                             popUpTo(Destination.Scan.route) { inclusive = true }
                             launchSingleTop = true
                         }
-                    }
+                    },
+                    // On HTTP 401 the JWT is invalid/expired — send the user to login;
+                    // a fresh login overwrites the stored token.
+                    onSessionExpired = onLogout
                 )
             }
         }

@@ -12,11 +12,18 @@ import java.util.concurrent.TimeUnit
 class AuthInterceptor(private val tokenStore: TokenStore) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): okhttp3.Response {
         val token = tokenStore.getToken()
+        val original = chain.request()
         val request = if (token != null) {
-            chain.request().newBuilder()
+            original.newBuilder()
                 .addHeader("Authorization", "Bearer $token")
                 .build()
-        } else chain.request()
+        } else original
+        // Safe debug: never log the token itself — only whether it's attached
+        // and its length, so we can confirm the scan upload is authenticated.
+        android.util.Log.d(
+            "VastraScan",
+            "${original.method} ${original.url.encodedPath} → Authorization attached=${token != null} tokenLen=${token?.length ?: 0}"
+        )
         return chain.proceed(request)
     }
 }

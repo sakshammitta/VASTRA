@@ -39,7 +39,9 @@ data class WardrobeUiState(
     val isConfirming: Boolean = false,
     // Temporary on-screen scan-flow trace (visible debug panel on the Scan screen).
     val scanStatus: String? = null,
-    val scanDebug: String? = null
+    val scanDebug: String? = null,
+    // Set when a scan request returns HTTP 401 — prompt the user to sign in again.
+    val sessionExpired: Boolean = false
 )
 
 @HiltViewModel
@@ -101,8 +103,9 @@ class WardrobeViewModel @Inject constructor(
                     pollScanJob(result.data.jobId)
                 }
                 is ApiResult.Error -> {
-                    android.util.Log.e("VastraScan", "scanImage error: ${result.message}")
-                    setScanError("Detection failed", result.message)
+                    android.util.Log.e("VastraScan", "scanImage error [${result.code}]: ${result.message}")
+                    if (result.code == 401) handleSessionExpired(result.message)
+                    else setScanError("Detection failed", result.message)
                 }
             }
         }
@@ -110,6 +113,18 @@ class WardrobeViewModel @Inject constructor(
 
     private fun setScanError(status: String, debug: String?) {
         _uiState.update { it.copy(scanStatus = status, scanDebug = debug, error = "$status: ${debug ?: ""}") }
+    }
+
+    private fun handleSessionExpired(debug: String?) {
+        android.util.Log.w("VastraScan", "session expired (401): $debug")
+        _uiState.update {
+            it.copy(
+                sessionExpired = true,
+                scanStatus = "Session expired",
+                scanDebug = debug,
+                error = "Your session expired. Please sign in again."
+            )
+        }
     }
 
     private fun pollScanJob(jobId: String) {
@@ -160,7 +175,8 @@ class WardrobeViewModel @Inject constructor(
                         }
                     }
                     is ApiResult.Error -> {
-                        setScanError("Detection failed (poll)", result.message)
+                        if (result.code == 401) handleSessionExpired(result.message)
+                        else setScanError("Detection failed (poll)", result.message)
                         return@launch
                     }
                 }
@@ -251,5 +267,5 @@ class WardrobeViewModel @Inject constructor(
     fun reportScanStatus(status: String, debug: String? = null) =
         _uiState.update { it.copy(scanStatus = status, scanDebug = debug, error = null) }
 
-    fun clearError() = _uiState.update { it.copy(error = null) }
+    fun clearError() = _uiState.update { it.copy(error = null, sessionExpired = false) }
 }
