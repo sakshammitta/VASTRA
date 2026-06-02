@@ -23,8 +23,11 @@ async def scan_and_embed(request: ScanAndEmbedRequest):
     """
     Single-round-trip endpoint: fetch the image from R2 once, run the full
     pipeline (DINO detection → crop → FashionCLIP classify + embed → colors),
-    and return EmbedResponse items.  The backend calls this instead of the
-    separate /scan + /embed pair, saving one R2 fetch per scan job.
+    and return EmbedResponse items.  Called by the backend for every app scan.
+
+    Uses detect_worn_outfit() (WORN_OUTFIT_PROMPT, box=0.25, area floor=0.02)
+    instead of the old detect_clothing() which used CLOTHING_PROMPT at box=0.35
+    and returned 0 detections on real worn-outfit photos (baseline 2026-06-02).
     """
     t0_total = time.perf_counter()
 
@@ -36,7 +39,7 @@ async def scan_and_embed(request: ScanAndEmbedRequest):
         raise HTTPException(status_code=404, detail=f"Image not found: {request.image_key}")
 
     t0 = time.perf_counter()
-    detections = detector.detect_clothing(image)
+    detections = detector.detect_worn_outfit(image)
     logger.info(f"timing dino-inference: {(time.perf_counter() - t0)*1000:.0f}ms  detections={len(detections)}")
 
     items = _embed_detections(image, detections)

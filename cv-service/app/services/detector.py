@@ -31,6 +31,28 @@ CLOTHING_PROMPT = (
     "hat . scarf . belt"
 )
 
+# Worn-outfit prompt: "<garment> worn by person" phrasing substantially improves
+# detection of clothing on a real person vs the production prompt above which
+# was tuned for flat-lay / isolated-item photos.  Diagnostic test result:
+#   production prompt  (box=0.35) → 0 detections on gym-selfie outfit photo
+#   worn-outfit prompt (box=0.25) → 5 raw detections incl. the correct top+bottom
+# Used by detect_worn_outfit() which is the primary production path for the
+# outfit-first app flow.  CLOTHING_PROMPT is kept for regression testing via
+# /scan/inspect.
+WORN_OUTFIT_PROMPT = (
+    "shirt worn by person . t-shirt worn by person . "
+    "jeans worn by person . trousers worn by person . pants worn by person . "
+    "hoodie worn by person . jacket worn by person . "
+    "shorts worn by person . skirt worn by person . shoes worn by person"
+)
+
+# Minimum garment box area (fraction of full image) to be considered a real
+# garment.  Empirical baseline from gym-selfie test:
+#   real top:    area ≈ 0.091   real bottom: area ≈ 0.083
+#   background fragments: area 0.002–0.005
+# Floor of 0.02 drops fragments with a wide safety margin.
+_MIN_GARMENT_AREA: float = float(os.getenv("MIN_GARMENT_AREA", "0.02"))
+
 _grounding_dino_model = None
 _grounding_dino_processor = None
 _models_loaded = False
@@ -182,6 +204,103 @@ def detect_clothing(
 
     except Exception as exc:
         logger.error(f"Grounding-DINO inference failed: {exc}")
+        return []
+
+
+def detect_worn_outfit(image: Image.Image) -> list[Detection]:
+    """
+    Primary production path for the outfit-first app flow.
+
+    Uses WORN_OUTFIT_PROMPT ("<garment> worn by person") at box_threshold=0.25
+    instead of the CLOTHING_PROMPT/0.35 defaults which produce zero detections
+    on real worn-outfit photos (gym-selfie baseline, 2026-06-02).
+
+    Post-processing applied on top of the standard NMS/dedup:
+      - drop any box whose normalized area < _MIN_GARMENT_AREA (default 0.02)
+        to eliminate tiny background/mirror/reflection fragments
+        (baseline: fragments had area 0.002–0.005; real garments 0.083–0.091)
+
+    Falls back to detect_clothing() behaviour when model is not loaded
+    (mock or empty list per CV_ALLOW_MOCK setting).
+    """
+    if not _models_loaded:
+        if _ALLOW_MOCK:
+            return _mock_detections(image)
+        logger.warning("Grounding-DINO not loaded; returning empty detections.")
+        return []
+
+    try:
+        import torch
+
+        inference_image = resize_for_inference(image, _DINO_MAX_SIDE)
+
+        t_pre = time.perf_counter()
+        device = next(_grounding_dino_model.parameters()).device
+        inputs = _grounding_dino_processor(
+            images=inference_image,
+            text=WORN_OUTFIT_PROMPT,
+            return_tensors="pt",
+        ).to(device)
+        pre_ms = (time.perf_counter() - t_pre) * 1000
+
+        pv = inputs.get("pixel_values")
+        pixel_shape = tuple(pv.shape) if pv is not None else None
+
+        t_fwd = time.perf_counter()
+        with torch.no_grad():
+            outputs = _grounding_dino_model(**inputs)
+        fwd_ms = (time.perf_counter() - t_fwd) * 1000
+
+        t_post = time.perf_counter()
+        results = _grounding_dino_processor.post_process_grounded_object_detection(
+            outputs,
+            inputs.input_ids,
+            box_threshold=0.25,
+            text_threshold=0.20,
+            target_sizes=[inference_image.size[::-1]],
+        )[0]
+        post_ms = (time.perf_counter() - t_post) * 1000
+
+        logger.info(
+            f"timing worn-dino-split: preprocess={pre_ms:.0f}ms  forward={fwd_ms:.0f}ms  "
+            f"postprocess={post_ms:.0f}ms  pixel_values={pixel_shape}"
+        )
+
+        w, h = inference_image.size
+        raw: list[Detection] = []
+        for box, score, label in zip(
+            results["boxes"], results["scores"], results["labels"]
+        ):
+            x_min, y_min, x_max, y_max = box.tolist()
+            nx_min = max(0.0, x_min / w)
+            ny_min = max(0.0, y_min / h)
+            nx_max = min(1.0, x_max / w)
+            ny_max = min(1.0, y_max / h)
+            area = (nx_max - nx_min) * (ny_max - ny_min)
+            if area < _MIN_GARMENT_AREA:
+                logger.debug(f"worn-outfit: dropping fragment '{label}' area={area:.4f} < {_MIN_GARMENT_AREA}")
+                continue
+            raw.append(
+                Detection(
+                    label=str(label).strip(),
+                    confidence=float(score),
+                    bbox=BoundingBox(
+                        x_min=nx_min, y_min=ny_min,
+                        x_max=nx_max, y_max=ny_max,
+                    ),
+                )
+            )
+
+        raw.sort(key=lambda d: d.confidence, reverse=True)
+        kept = _deduplicate(raw)[:10]
+        logger.info(
+            f"worn-outfit: {len(results['boxes'])} raw → "
+            f"{len(raw)} after area floor → {len(kept)} after dedup"
+        )
+        return kept
+
+    except Exception as exc:
+        logger.error(f"Grounding-DINO worn-outfit inference failed: {exc}")
         return []
 
 

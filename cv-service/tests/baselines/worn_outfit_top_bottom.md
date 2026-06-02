@@ -69,7 +69,18 @@ The noise comes from other people / mirror reflections in the gym, NOT
 duplicate boxes over the user's own clothes. So the fix is main-SUBJECT
 association, not just NMS.
 
-### Candidate fix under test — main-subject filter
+### Fix applied to production path (2026-06-02)
+/embed/full (the app scan route) now calls detector.detect_worn_outfit() instead
+of detect_clothing(). Changes vs the old path:
+  - Prompt: WORN_OUTFIT_PROMPT ("shirt worn by person" phrasing)
+  - box_threshold: 0.25 (was 0.35)
+  - text_threshold: 0.20 (was 0.25)
+  - Area floor: boxes with normalized area < 0.02 are dropped before NMS
+    (baseline: fragments were 0.002-0.005; real garments 0.083-0.091)
+  - MIN_GARMENT_AREA is env-var overridable without redeploy
+/scan and /scan/inspect still use detect_clothing() for regression comparison.
+
+### Candidate fix under investigation — main-subject filter
 POST /scan/diagnose/subject (experimental, read-only):
   1. worn-outfit garment prompt (box=0.25)
   2. person prompt → largest person box = primary subject
