@@ -1,6 +1,7 @@
 import uuid
 import logging
 import time
+from typing import Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from PIL import Image
@@ -97,25 +98,53 @@ class RawDetection(BaseModel):
     y_max: float
 
 
+class DiagnoseCase(BaseModel):
+    name: str                          # stable identifier, e.g. "production@0.35"
+    prompt: str                        # the exact prompt text used
+    box_threshold: float
+    text_threshold: float
+    detections: list[RawDetection]     # raw boxes (pre-NMS), highest conf first
+    count: int                         # len(detections), for quick scanning
+    forward_ms: int                    # DINO forward-pass time for this case
+    error: Optional[str] = None        # populated instead of detections if the case failed
+
+
 class DiagnoseResponse(BaseModel):
     image_width: int
     image_height: int
-    # Each key is "box=X text=Y"; value is the raw (pre-NMS) detections at that level.
-    threshold_sweep: dict[str, list[RawDetection]]
-    # Final post-NMS result at production thresholds (box=0.35 text=0.25).
-    production_detections: list[Detection]
-    # Human-readable one-line diagnosis.
-    diagnosis: str
+    cases: list[DiagnoseCase]          # one entry per (prompt, threshold) tested
+    production_detections: list[Detection]   # post-NMS result at production settings
+    diagnosis: str                     # human-readable one-line summary
+
+
+# A worn-outfit-specific prompt: concrete nouns plus body-region anchoring, the
+# phrasing most likely to help Grounding-DINO localise garments on a person.
+_WORN_OUTFIT_PROMPT = (
+    "shirt worn by person . t-shirt worn by person . "
+    "jeans worn by person . trousers worn by person . pants worn by person . "
+    "hoodie worn by person . jacket worn by person . "
+    "shorts worn by person . skirt worn by person . shoes worn by person"
+)
 
 
 @router.post("/diagnose", response_model=DiagnoseResponse)
 async def diagnose_outfit_detection(file: UploadFile = File(...)):
     """
-    READ-ONLY diagnostic endpoint. Runs Grounding-DINO at four threshold levels
-    and returns ALL raw boxes before NMS/deduplication, plus the production
-    pipeline result. Use this to distinguish between:
-      - model sees detections but production threshold (0.35) is too strict
-      - model genuinely produces zero detections at all threshold levels
+    READ-ONLY diagnostic endpoint for the worn-outfit "0 items detected" case.
+
+    Runs THREE meaningful cases only (two DINO forward passes total, kept light
+    because each forward pass is ~15s on CPU):
+
+      1. production@0.35  — current prompt, current threshold (the failing case)
+      2. production@0.25  — current prompt, lower threshold (reuses pass #1)
+      3. worn-outfit@0.25 — worn-garment prompt, lower threshold (second pass)
+
+    For each case it returns the RAW boxes (label, confidence, normalized bbox)
+    BEFORE any NMS/deduplication, so you can tell whether the problem is the
+    threshold, the prompt wording, or genuine detector blindness.
+
+    Each case is isolated: if one fails, its `error` field is populated and the
+    others still return. The endpoint always returns valid JSON.
 
     Nothing is persisted. No R2, no Redis, no Postgres writes.
 
@@ -129,6 +158,9 @@ async def diagnose_outfit_detection(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
 
+    if not detector.is_loaded():
+        raise HTTPException(status_code=503, detail="Grounding-DINO model not loaded")
+
     import torch
     from app.services.detector import (
         _grounding_dino_model as _dino_model,
@@ -136,38 +168,25 @@ async def diagnose_outfit_detection(file: UploadFile = File(...)):
         resize_for_inference, _DINO_MAX_SIDE,
     )
 
-    if not detector.is_loaded():
-        raise HTTPException(status_code=503, detail="Grounding-DINO model not loaded")
-
-    threshold_levels = [
-        (0.35, 0.25),
-        (0.25, 0.20),
-        (0.15, 0.10),
-        (0.10, 0.05),
-    ]
-
     inf_img = resize_for_inference(image, _DINO_MAX_SIDE)
     device = next(_dino_model.parameters()).device
-    inputs = _dino_proc(
-        images=inf_img,
-        text=detector.CLOTHING_PROMPT,
-        return_tensors="pt",
-    ).to(device)
-
-    t0 = time.perf_counter()
-    with torch.no_grad():
-        outputs = _dino_model(**inputs)
-    logger.info(f"timing diagnose-dino-forward: {(time.perf_counter() - t0)*1000:.0f}ms")
-
     w, h = inf_img.size
-    sweep: dict[str, list[RawDetection]] = {}
 
-    for box_t, text_t in threshold_levels:
+    def _forward(prompt: str):
+        """Run a single DINO forward pass for *prompt*; returns (outputs, input_ids, ms)."""
+        inputs = _dino_proc(images=inf_img, text=prompt, return_tensors="pt").to(device)
+        t0 = time.perf_counter()
+        with torch.no_grad():
+            outputs = _dino_model(**inputs)
+        ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(f"timing diagnose-forward: {ms}ms  prompt='{prompt[:40]}…'")
+        return outputs, inputs.input_ids, ms
+
+    def _decode(outputs, input_ids, box_t: float, text_t: float) -> list[RawDetection]:
+        """Post-process one forward pass at the given thresholds into raw detections."""
         results = _dino_proc.post_process_grounded_object_detection(
-            outputs,
-            inputs.input_ids,
-            box_threshold=box_t,
-            text_threshold=text_t,
+            outputs, input_ids,
+            box_threshold=box_t, text_threshold=text_t,
             target_sizes=[inf_img.size[::-1]],
         )[0]
         raw = []
@@ -182,37 +201,102 @@ async def diagnose_outfit_detection(file: UploadFile = File(...)):
                 y_max=round(min(1.0, y2 / h), 4),
             ))
         raw.sort(key=lambda d: d.conf, reverse=True)
-        sweep[f"box={box_t}_text={text_t}"] = raw
+        return raw
 
-    production_dets = detector.detect_clothing(image)
+    cases: list[DiagnoseCase] = []
 
-    # Derive a one-line diagnosis
-    prod_raw = sweep["box=0.35_text=0.25"]
-    if prod_raw:
-        diagnosis = f"Production threshold sufficient: {len(prod_raw)} raw boxes, {len(production_dets)} after NMS"
-    elif sweep["box=0.25_text=0.20"]:
-        best = sweep["box=0.25_text=0.20"][0]
+    # ── Forward pass #1: production prompt (reused at two thresholds) ──────────
+    prod_outputs = prod_ids = None
+    prod_ms = 0
+    try:
+        prod_outputs, prod_ids, prod_ms = _forward(detector.CLOTHING_PROMPT)
+    except Exception as e:
+        logger.error(f"diagnose: production forward pass failed: {e}")
+
+    for name, box_t, text_t in [
+        ("production@0.35", 0.35, 0.25),
+        ("production@0.25", 0.25, 0.20),
+    ]:
+        if prod_outputs is None:
+            cases.append(DiagnoseCase(
+                name=name, prompt=detector.CLOTHING_PROMPT,
+                box_threshold=box_t, text_threshold=text_t,
+                detections=[], count=0, forward_ms=prod_ms,
+                error="production forward pass failed",
+            ))
+            continue
+        try:
+            dets = _decode(prod_outputs, prod_ids, box_t, text_t)
+            cases.append(DiagnoseCase(
+                name=name, prompt=detector.CLOTHING_PROMPT,
+                box_threshold=box_t, text_threshold=text_t,
+                detections=dets, count=len(dets), forward_ms=prod_ms,
+            ))
+        except Exception as e:
+            logger.error(f"diagnose: decode {name} failed: {e}")
+            cases.append(DiagnoseCase(
+                name=name, prompt=detector.CLOTHING_PROMPT,
+                box_threshold=box_t, text_threshold=text_t,
+                detections=[], count=0, forward_ms=prod_ms, error=str(e),
+            ))
+
+    # ── Forward pass #2: worn-outfit prompt at the lower threshold ────────────
+    try:
+        worn_outputs, worn_ids, worn_ms = _forward(_WORN_OUTFIT_PROMPT)
+        dets = _decode(worn_outputs, worn_ids, 0.25, 0.20)
+        cases.append(DiagnoseCase(
+            name="worn-outfit@0.25", prompt=_WORN_OUTFIT_PROMPT,
+            box_threshold=0.25, text_threshold=0.20,
+            detections=dets, count=len(dets), forward_ms=worn_ms,
+        ))
+    except Exception as e:
+        logger.error(f"diagnose: worn-outfit case failed: {e}")
+        cases.append(DiagnoseCase(
+            name="worn-outfit@0.25", prompt=_WORN_OUTFIT_PROMPT,
+            box_threshold=0.25, text_threshold=0.20,
+            detections=[], count=0, forward_ms=0, error=str(e),
+        ))
+
+    # ── Production pipeline result (post-NMS), best-effort ────────────────────
+    try:
+        production_dets = detector.detect_clothing(image)
+    except Exception as e:
+        logger.error(f"diagnose: production pipeline failed: {e}")
+        production_dets = []
+
+    # ── One-line diagnosis from the case results (no hardcoded keys) ──────────
+    by_name = {c.name: c for c in cases}
+    prod35 = by_name.get("production@0.35")
+    prod25 = by_name.get("production@0.25")
+    worn25 = by_name.get("worn-outfit@0.25")
+
+    if prod35 and prod35.count > 0:
         diagnosis = (
-            f"Detections exist below production threshold — top conf={best.conf:.3f} at box=0.25. "
-            "Recommend lowering box_threshold to 0.25 for outfit photos."
+            f"Production threshold sufficient: {prod35.count} raw boxes at 0.35, "
+            f"{len(production_dets)} after NMS. Investigate NMS if app still shows 0."
         )
-    elif sweep["box=0.15_text=0.10"]:
-        best = sweep["box=0.15_text=0.10"][0]
+    elif prod25 and prod25.count > 0:
+        top = prod25.detections[0].conf
         diagnosis = (
-            f"Very low confidence detections only (top={best.conf:.3f} at box=0.15). "
-            "Prompt change likely needed for this photo type."
+            f"Detections exist at box=0.25 (top conf={top:.3f}) but not at 0.35. "
+            "Likely fix: lower box_threshold to 0.25 for outfit photos."
         )
-    elif sweep["box=0.10_text=0.05"]:
+    elif worn25 and worn25.count > 0:
+        top = worn25.detections[0].conf
         diagnosis = (
-            "Near-floor detections only. Model is not recognising clothing in this image reliably."
+            f"Only the worn-outfit prompt detects anything (top conf={top:.3f} at 0.25). "
+            "Likely fix: prompt wording, not just threshold."
         )
     else:
-        diagnosis = "ZERO detections at all threshold levels. Model produced nothing for this image."
+        diagnosis = (
+            "ZERO detections across all three cases. Neither lower threshold nor the "
+            "worn-outfit prompt helped — points to detector capability/image issue."
+        )
 
     return DiagnoseResponse(
         image_width=image.width,
         image_height=image.height,
-        threshold_sweep=sweep,
+        cases=cases,
         production_detections=production_dets,
         diagnosis=diagnosis,
     )
