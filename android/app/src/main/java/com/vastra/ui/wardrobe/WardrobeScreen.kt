@@ -440,18 +440,11 @@ fun DetectedItemRow(
                 onSelected = onCategoryChange,
                 modifier = Modifier.weight(1f)
             )
-            OutlinedTextField(
+            SubtypeField(
+                category = category,
                 value = subCategory,
                 onValueChange = onSubcategoryChange,
-                singleLine = true,
-                label = { Text("Type", style = MaterialTheme.typography.labelSmall) },
-                placeholder = { Text("e.g. t-shirt") },
-                textStyle = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.weight(1f),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = VastraInk,
-                    unfocusedBorderColor = VastraBorderColor
-                )
+                modifier = Modifier.weight(1f)
             )
         }
     }
@@ -492,6 +485,70 @@ private fun CategoryDropdown(
                         expanded = false
                     }
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Editable Type field with normalized subtype suggestions for the current
+ * category. The field stays free-text — suggestions are a convenience, and the
+ * user can always type a custom value. Whatever is here at confirm time is what
+ * gets saved.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SubtypeField(
+    category: ClothingCategory,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val allSuggestions = remember(category) { SubtypeVocabulary.suggestionsFor(category) }
+    // Filter suggestions by what the user has typed so far (case-insensitive).
+    val filtered = remember(value, allSuggestions) {
+        if (value.isBlank()) allSuggestions
+        else allSuggestions.filter { it.contains(value.trim(), ignoreCase = true) }
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded && filtered.isNotEmpty(),
+        onExpandedChange = { expanded = it },
+        modifier = modifier
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {
+                onValueChange(it)
+                expanded = true
+            },
+            singleLine = true,
+            label = { Text("Type", style = MaterialTheme.typography.labelSmall) },
+            placeholder = { Text("e.g. joggers") },
+            textStyle = MaterialTheme.typography.bodySmall,
+            trailingIcon = {
+                if (allSuggestions.isNotEmpty()) {
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                }
+            },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = VastraInk,
+                unfocusedBorderColor = VastraBorderColor
+            ),
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+        if (filtered.isNotEmpty()) {
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                filtered.forEach { suggestion ->
+                    DropdownMenuItem(
+                        text = { Text(suggestion, style = MaterialTheme.typography.bodySmall) },
+                        onClick = {
+                            onValueChange(suggestion)
+                            expanded = false
+                        }
+                    )
+                }
             }
         }
     }

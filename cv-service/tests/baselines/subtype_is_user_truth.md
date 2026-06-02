@@ -17,17 +17,30 @@ share category BOTTOM but differ in formality, so color-only matching is wrong.
 - ClothingItemEntity has a single `subCategory` column → no second path can
   overwrite the confirmed value with the raw AI label.
 
+## Implemented (2026-06-02)
+1. AI provenance columns (migration V4__ai_provenance.sql), nullable, write-once
+   at confirm time in WardrobeService.confirmScanItem:
+     - ai_predicted_category, ai_predicted_sub_category, ai_subtype_confidence,
+       ai_model_source ("grounding-dino-base+fashion-clip")
+   These NEVER override category/subCategory — those stay the confirmed truth.
+   Provenance is for debugging/analytics/model improvement only. Query the DB
+   to measure AI-correct vs user-corrected during outfit testing.
+2. Review-UI Type field: now an editable field with normalized subtype
+   SUGGESTIONS per category (Android SubtypeVocabulary mirrors the backend one),
+   still free-text so a custom value can be typed. Whatever is confirmed is saved.
+3. Placeholder match scoring is hidden/marked (not presented as real):
+   - SwipeScreen "% match" badge removed (was driven by styleMatchPercent placeholder)
+   - FeedScreen RecreateStyleDialog now shows "Preview · style matching is not
+     live yet" instead of a fabricated match % (backed by Math.random()).
+
 ## Not yet implemented (tracked)
-1. AI provenance: the original predicted subtype + confidence are NOT persisted
-   (they live only in the 24h Redis scan job). Optional ("may be kept").
-   Would require nullable columns ai_predicted_subcategory, ai_subtype_confidence.
-2. Recommendation engine currently ignores subCategory entirely — it uses the
-   FashionCLIP embedding + a Math.random() placeholder score
-   (RecommendationService.java:77). Type/formality/occasion-aware matching is
-   future work. When built it must read the confirmed subCategory + use
-   com.vastra.domain.SubtypeVocabulary formality.
-3. Review UI Type field is free-text. SubtypeVocabulary.suggestionsFor(category)
-   is prepared to back a suggestion list while keeping free-text correction.
+1. Recommendation engine still ignores subCategory — uses the FashionCLIP
+   embedding + a Math.random() placeholder score (RecommendationService.java:77).
+   Type/formality/occasion-aware matching is future work. When built it must read
+   the confirmed subCategory and use com.vastra.domain.SubtypeVocabulary formality.
+   Until then NO style-match output is shown as a real number anywhere.
+2. AI provenance is stored but not yet exposed via the API/response DTO — read
+   it from Postgres directly for now.
 
 ## Normalized bottoms vocabulary (prepared)
 com.vastra.domain.SubtypeVocabulary.BOTTOMS:

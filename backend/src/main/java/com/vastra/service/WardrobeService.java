@@ -20,6 +20,10 @@ public class WardrobeService {
     private static final org.slf4j.Logger log =
             org.slf4j.LoggerFactory.getLogger(WardrobeService.class);
 
+    // Identifies the CV models that produced AI provenance. Bump when the
+    // detector/classifier changes so analytics can segment by model version.
+    private static final String AI_MODEL_SOURCE = "grounding-dino-base+fashion-clip";
+
     private final ClothingItemRepository itemRepo;
     private final UserRepository userRepo;
     private final R2Service r2Service;
@@ -129,6 +133,17 @@ public class WardrobeService {
         item.setTags(req.tags() != null ? req.tags() : List.of());
         item.setBrand(req.brand());
         item.setPriceUsd(req.priceUsd());
+
+        // AI provenance — record what the CV pipeline predicted, regardless of
+        // whether the user accepted or corrected it. Debugging/analytics only;
+        // the canonical type stays category/subCategory set above.
+        item.setAiPredictedCategory(cvCategory);
+        item.setAiPredictedSubCategory(cvSubCategory.isBlank() ? null : cvSubCategory);
+        Object cvConf = detected.get("subtype_confidence");
+        if (cvConf instanceof Number n) {
+            item.setAiSubtypeConfidence(n.floatValue());
+        }
+        item.setAiModelSource(AI_MODEL_SOURCE);
 
         item = itemRepo.save(item);
         itemRepo.flush();

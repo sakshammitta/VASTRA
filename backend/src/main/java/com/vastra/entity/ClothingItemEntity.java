@@ -49,6 +49,22 @@ public class ClothingItemEntity {
 
     private int styleMatchPercent = 0;
 
+    // ── AI provenance (debugging / analytics only) ────────────────────────────
+    // What the CV pipeline predicted at scan time. NEVER used as the canonical
+    // garment type — category/subCategory above are the user-confirmed truth.
+    // Nullable: manually-added items and pre-V4 rows have no provenance.
+    @Column(name = "ai_predicted_category")
+    private String aiPredictedCategory;
+
+    @Column(name = "ai_predicted_sub_category")
+    private String aiPredictedSubCategory;
+
+    @Column(name = "ai_subtype_confidence")
+    private Float aiSubtypeConfidence;
+
+    @Column(name = "ai_model_source")
+    private String aiModelSource;
+
     @Column(columnDefinition = "vector(512)")
     @ColumnTransformer(write = "CAST(? AS vector)")
     private String fashionClipEmbedding;
@@ -200,6 +216,38 @@ public class ClothingItemEntity {
 
     public void setStyleMatchPercent(int styleMatchPercent) {
         this.styleMatchPercent = styleMatchPercent;
+    }
+
+    public String getAiPredictedCategory() {
+        return aiPredictedCategory;
+    }
+
+    public void setAiPredictedCategory(String aiPredictedCategory) {
+        this.aiPredictedCategory = aiPredictedCategory;
+    }
+
+    public String getAiPredictedSubCategory() {
+        return aiPredictedSubCategory;
+    }
+
+    public void setAiPredictedSubCategory(String aiPredictedSubCategory) {
+        this.aiPredictedSubCategory = aiPredictedSubCategory;
+    }
+
+    public Float getAiSubtypeConfidence() {
+        return aiSubtypeConfidence;
+    }
+
+    public void setAiSubtypeConfidence(Float aiSubtypeConfidence) {
+        this.aiSubtypeConfidence = aiSubtypeConfidence;
+    }
+
+    public String getAiModelSource() {
+        return aiModelSource;
+    }
+
+    public void setAiModelSource(String aiModelSource) {
+        this.aiModelSource = aiModelSource;
     }
 
     public String getFashionClipEmbedding() {

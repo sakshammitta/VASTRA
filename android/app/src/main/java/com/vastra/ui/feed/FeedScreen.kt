@@ -354,7 +354,9 @@ fun RecreateStyleDialog(result: com.vastra.data.model.RecreateStyleResponse, onD
         title = { Text("Style Recreated", style = MaterialTheme.typography.headlineSmall) },
         text = {
             Column {
-                Text("${(result.matchScore * 100).toInt()}% match with your wardrobe", style = MaterialTheme.typography.bodyMedium, color = VastraGold, fontWeight = FontWeight.SemiBold)
+                // Style matching is not live yet — the backend match score is a
+                // placeholder, so we mark this clearly instead of showing a fake %.
+                Text("Preview · style matching is not live yet", style = MaterialTheme.typography.bodyMedium, color = VastraSubtext, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(12.dp))
                 if (result.ownedMatches.isNotEmpty()) {
                     Text("You already own (${result.ownedMatches.size} items):", style = MaterialTheme.typography.labelMedium, color = VastraSubtext)

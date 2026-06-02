@@ -281,20 +281,10 @@ fun SwipeCardItem(
                 item.priceUsd?.let { price ->
                     Text("\$${"%.0f".format(price)}", color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
                 }
-                if (item.styleMatchPercent > 0) {
-                    Surface(
-                        color = VastraGold.copy(alpha = 0.9f),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(
-                            "${item.styleMatchPercent}% match",
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
+                // Style-match scoring is not implemented yet (the backend uses a
+                // placeholder, not real type/occasion-aware logic), so we do NOT
+                // show a "% match" badge — it would misrepresent fake numbers as
+                // real Vastra intelligence. Re-enable once real scoring exists.
             }
             if (item.colorPalette.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
