@@ -101,18 +101,32 @@ class WardrobeRepository @Inject constructor(private val api: VastraApiService) 
     } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
 
     suspend fun scanItem(imageFile: File): ApiResult<ScanJobResponse> = try {
+        android.util.Log.d(
+            "VastraScan",
+            "scanItem → POST /api/wardrobe/scan  file=${imageFile.absolutePath} " +
+                "exists=${imageFile.exists()} size=${imageFile.length()}B"
+        )
         val part = MultipartBody.Part.createFormData(
             "image", imageFile.name,
             imageFile.asRequestBody("image/*".toMediaType())
         )
         val r = api.scanItem(part)
-        if (r.isSuccessful) ApiResult.Success(r.body()!!) else ApiResult.Error(r.message(), r.code())
-    } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+        android.util.Log.d("VastraScan", "scanItem ← HTTP ${r.code()} success=${r.isSuccessful}")
+        if (r.isSuccessful) ApiResult.Success(r.body()!!)
+        else ApiResult.Error(httpError("scan", r.code(), r.errorBody()?.string(), r.message()), r.code())
+    } catch (e: Exception) {
+        android.util.Log.e("VastraScan", "scanItem threw", e)
+        ApiResult.Error(netError("scan", e))
+    }
 
     suspend fun pollScanJob(jobId: String): ApiResult<ScanJob> = try {
         val r = api.getScanStatus(jobId)
-        if (r.isSuccessful) ApiResult.Success(r.body()!!) else ApiResult.Error(r.message(), r.code())
-    } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+        if (r.isSuccessful) ApiResult.Success(r.body()!!)
+        else ApiResult.Error(httpError("poll", r.code(), r.errorBody()?.string(), r.message()), r.code())
+    } catch (e: Exception) {
+        android.util.Log.e("VastraScan", "pollScanJob threw", e)
+        ApiResult.Error(netError("poll", e))
+    }
 
     suspend fun confirmScanItem(
         jobId: String,
@@ -135,6 +149,22 @@ class WardrobeRepository @Inject constructor(private val api: VastraApiService) 
         val r = api.deleteItem(itemId)
         if (r.isSuccessful) ApiResult.Success(Unit) else ApiResult.Error(r.message(), r.code())
     } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+
+    /** Build a readable message for a non-2xx HTTP response. Response.message() is
+     *  frequently blank, so fall back to the error body, then the status code. */
+    private fun httpError(stage: String, code: Int, body: String?, message: String?): String {
+        val detail = body?.takeIf { it.isNotBlank() }
+            ?: message?.takeIf { it.isNotBlank() }
+            ?: "HTTP $code"
+        return "Scan ($stage) failed [$code]: $detail"
+    }
+
+    /** Build a readable message for a thrown exception (no server response). */
+    private fun netError(stage: String, e: Exception): String {
+        val cls = e.javaClass.simpleName
+        val msg = e.message ?: "no detail"
+        return "Scan ($stage) couldn't reach the server ($cls): $msg"
+    }
 }
 
 @Singleton

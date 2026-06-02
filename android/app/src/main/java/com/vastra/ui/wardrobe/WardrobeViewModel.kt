@@ -68,11 +68,25 @@ class WardrobeViewModel @Inject constructor(
     fun hideAddSheet() = _uiState.update { it.copy(showAddSheet = false) }
 
     fun scanImage(imageFile: File) {
+        android.util.Log.d(
+            "VastraScan",
+            "scanImage() called: ${imageFile.absolutePath} exists=${imageFile.exists()} size=${imageFile.length()}B"
+        )
         viewModelScope.launch {
             _uiState.update { it.copy(showAddSheet = false) }
+            if (!imageFile.exists() || imageFile.length() == 0L) {
+                _uiState.update { it.copy(error = "Selected image is empty or unreadable (size=${imageFile.length()}B). Try another photo.") }
+                return@launch
+            }
             when (val result = repo.scanItem(imageFile)) {
-                is ApiResult.Success -> pollScanJob(result.data.jobId)
-                is ApiResult.Error -> _uiState.update { it.copy(error = result.message) }
+                is ApiResult.Success -> {
+                    android.util.Log.d("VastraScan", "scanImage: job started jobId=${result.data.jobId}")
+                    pollScanJob(result.data.jobId)
+                }
+                is ApiResult.Error -> {
+                    android.util.Log.e("VastraScan", "scanImage error: ${result.message}")
+                    _uiState.update { it.copy(error = result.message) }
+                }
             }
         }
     }
@@ -204,6 +218,9 @@ class WardrobeViewModel @Inject constructor(
             }
         }
     }
+
+    /** Surface a client-side error (e.g. failed image read) in the same snackbar. */
+    fun reportScanError(message: String) = _uiState.update { it.copy(error = message) }
 
     fun clearError() = _uiState.update { it.copy(error = null) }
 }

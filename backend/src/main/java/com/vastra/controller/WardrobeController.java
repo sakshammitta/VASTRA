@@ -20,6 +20,9 @@ import java.util.UUID;
 @RequestMapping("/api/wardrobe")
 public class WardrobeController {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(WardrobeController.class);
+
     private final WardrobeService wardrobeService;
     private final ScanJobService scanJobService;
     private final R2Service r2Service;
@@ -42,7 +45,11 @@ public class WardrobeController {
     public ResponseEntity<Map<String, String>> scanItem(
             @RequestPart("image") MultipartFile image,
             Authentication auth) throws IOException {
-        String jobId = wardrobeService.initiateItemScan((UUID) auth.getPrincipal(), image);
+        UUID userId = (UUID) auth.getPrincipal();
+        log.info("POST /api/wardrobe/scan user={} filename={} size={}B contentType={}",
+                userId, image.getOriginalFilename(), image.getSize(), image.getContentType());
+        String jobId = wardrobeService.initiateItemScan(userId, image);
+        log.info("POST /api/wardrobe/scan accepted user={} jobId={}", userId, jobId);
         return ResponseEntity.ok(Map.of("jobId", jobId, "status", "QUEUED"));
     }
 

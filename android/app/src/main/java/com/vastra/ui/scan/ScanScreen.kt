@@ -35,6 +35,7 @@ import com.vastra.ui.wardrobe.toTempFile
 @Composable
 fun ScanScreen(
     onBack: () -> Unit,
+    onFinishToWardrobe: () -> Unit = onBack,
     viewModel: WardrobeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -44,8 +45,18 @@ fun ScanScreen(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         // Stay on screen — the scanning overlay appears, then the selection sheet,
-        // and onBack is called only after confirmation/dismissal below.
-        uri?.let { viewModel.scanImage(uri.toTempFile(context)) }
+        // and navigation happens only after confirmation/dismissal below.
+        if (uri == null) {
+            android.util.Log.d("VastraScan", "gallery picker returned null Uri (user cancelled)")
+        } else {
+            android.util.Log.d("VastraScan", "gallery picker returned uri=$uri")
+            runCatching { uri.toTempFile(context) }
+                .onSuccess { viewModel.scanImage(it) }
+                .onFailure { e ->
+                    android.util.Log.e("VastraScan", "toTempFile failed", e)
+                    viewModel.reportScanError("Couldn't read the selected image: ${e.message}")
+                }
+        }
     }
 
     Box(
@@ -256,7 +267,7 @@ fun ScanScreen(
                 onSubcategoryChange = { i, s -> viewModel.setItemSubcategory(i, s) },
                 onConfirm = {
                     viewModel.confirmSelectedItems()
-                    onBack()
+                    onFinishToWardrobe()
                 },
                 onDismiss = {
                     viewModel.dismissScanResult()
@@ -266,11 +277,22 @@ fun ScanScreen(
         }
 
         // ── Error snackbar ───────────────────────────────────────────────────
+        // Explicit high-contrast colors so the message is always readable
+        // (the default container/content pairing rendered the text invisibly).
         uiState.error?.let { msg ->
             Snackbar(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
-                action = { TextButton(onClick = { viewModel.clearError() }) { Text("Dismiss") } }
-            ) { Text(msg) }
+                containerColor = VastraInk,
+                contentColor = VastraCream,
+                actionColor = VastraCream,
+                action = {
+                    TextButton(onClick = { viewModel.clearError() }) {
+                        Text("Dismiss", color = VastraCream, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            ) {
+                Text(msg, color = VastraCream)
+            }
         }
     }
 }

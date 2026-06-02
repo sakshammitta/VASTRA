@@ -120,7 +120,16 @@ fun MainScreen(onLogout: () -> Unit) {
                 MeScreen(onLogout = onLogout)
             }
             composable(Destination.Scan.route) {
-                ScanScreen(onBack = { navController.popBackStack() })
+                ScanScreen(
+                    onBack = { navController.popBackStack() },
+                    onFinishToWardrobe = {
+                        // After confirm/save, land the user on Wardrobe to see the new item.
+                        navController.navigate(Destination.Wardrobe.route) {
+                            popUpTo(Destination.Scan.route) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                )
             }
         }
     }

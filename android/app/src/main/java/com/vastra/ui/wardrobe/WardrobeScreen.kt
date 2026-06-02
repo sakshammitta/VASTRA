@@ -653,13 +653,18 @@ private fun parseHexColor(hex: String): Color = try {
 
 /** Copy a content URI to a temporary file so it can be sent as a multipart body. */
 fun Uri.toTempFile(context: Context): File {
+    val mime = context.contentResolver.getType(this)
     val input = context.contentResolver.openInputStream(this)!!
-    val suffix = when (context.contentResolver.getType(this)) {
+    val suffix = when (mime) {
         "image/png"  -> ".png"
         "image/webp" -> ".webp"
         else         -> ".jpg"
     }
     val tmp = File.createTempFile("scan_", suffix, context.cacheDir)
     tmp.outputStream().use { input.copyTo(it) }
+    android.util.Log.d(
+        "VastraScan",
+        "toTempFile: uri=$this mime=$mime → ${tmp.absolutePath} size=${tmp.length()}B"
+    )
     return tmp
 }
