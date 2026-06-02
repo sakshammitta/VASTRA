@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from typing import Optional
 import numpy as np
 from PIL import Image
@@ -12,6 +13,13 @@ logger = logging.getLogger(__name__)
 # detections. With real models unavailable and mock disabled, detect_clothing()
 # returns an empty list so the caller sees "no items detected" — an honest state.
 _ALLOW_MOCK: bool = os.getenv("CV_ALLOW_MOCK", "false").lower() == "true"
+
+# Maximum longest-edge pixel dimension for the image sent to Grounding-DINO.
+# The model operates on a 640-px feature grid regardless of input size;
+# passing a 3072×4080 phone photo gives no extra accuracy but adds ~18 s on CPU.
+# Bounding boxes are normalized (0-1) so they remain valid for the original image.
+# Set DINO_MAX_SIDE=0 to disable resizing and use the original image (old behaviour).
+_DINO_MAX_SIDE: int = int(os.getenv("DINO_MAX_SIDE", "1280"))
 
 CLOTHING_PROMPT = (
     "shirt . t-shirt . blouse . top . sweater . hoodie . "
@@ -60,6 +68,29 @@ def is_loaded() -> bool:
     return _models_loaded
 
 
+def resize_for_inference(image: Image.Image, max_side: int) -> Image.Image:
+    """
+    Resize *image* so its longest edge is at most *max_side* pixels, preserving
+    aspect ratio with high-quality downsampling.  Returns the original if it
+    already fits or max_side == 0.
+
+    Because detect_clothing() normalizes bboxes by the image it receives, the
+    returned coordinates are identical regardless of whether the original or
+    the resized image is passed — callers can always use them against the
+    full-resolution original for cropping.
+    """
+    if max_side <= 0:
+        return image
+    w, h = image.size
+    longest = max(w, h)
+    if longest <= max_side:
+        return image
+    scale = max_side / longest
+    new_w, new_h = int(w * scale), int(h * scale)
+    logger.info(f"resize_for_inference: {w}x{h} → {new_w}x{new_h} (max_side={max_side})")
+    return image.resize((new_w, new_h), Image.LANCZOS)
+
+
 def detect_clothing(
     image: Image.Image,
     box_threshold: float = 0.35,
@@ -67,6 +98,10 @@ def detect_clothing(
 ) -> list[Detection]:
     """
     Run Grounding-DINO on *image* and return deduplicated clothing detections.
+
+    The image is resized to at most DINO_MAX_SIDE on its longest edge before
+    inference.  Bounding boxes are always normalized (0-1) relative to whatever
+    image size DINO sees, so they remain valid for the full-resolution original.
 
     If the model is not loaded:
     - CV_ALLOW_MOCK=true  → return labelled mock detections (dev only).
@@ -82,9 +117,11 @@ def detect_clothing(
     try:
         import torch
 
+        inference_image = resize_for_inference(image, _DINO_MAX_SIDE)
+        t0 = time.perf_counter()
         device = next(_grounding_dino_model.parameters()).device
         inputs = _grounding_dino_processor(
-            images=image,
+            images=inference_image,
             text=CLOTHING_PROMPT,
             return_tensors="pt",
         ).to(device)
@@ -97,10 +134,12 @@ def detect_clothing(
             inputs.input_ids,
             box_threshold=box_threshold,
             text_threshold=text_threshold,
-            target_sizes=[image.size[::-1]],
+            target_sizes=[inference_image.size[::-1]],
         )[0]
+        logger.info(f"timing dino-model-only: {(time.perf_counter() - t0)*1000:.0f}ms  "
+                    f"input={inference_image.width}x{inference_image.height}")
 
-        w, h = image.size
+        w, h = inference_image.size
         raw: list[Detection] = []
         for box, score, label in zip(
             results["boxes"], results["scores"], results["labels"]

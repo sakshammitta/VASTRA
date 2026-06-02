@@ -133,8 +133,9 @@ class WardrobeViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(scanStatus = "Waiting for detection") }
             var attempts = 0
-            while (attempts < 30) {
-                delay(2000)
+            while (attempts < 40) {
+                // First two polls are quick (1 s) to catch fast results; then 2 s.
+                delay(if (attempts < 2) 1000L else 2000L)
                 when (val result = repo.pollScanJob(jobId)) {
                     is ApiResult.Success -> {
                         val job = result.data

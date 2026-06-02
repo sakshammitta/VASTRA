@@ -204,10 +204,10 @@ fun ScanScreen(
                 }
             }
 
-            // ── Temporary visible scan-flow debug panel ─────────────────────
-            // Shows the live status + full error text directly on the phone so
-            // testing doesn't depend on Logcat. Remove once the flow is verified.
-            if (uiState.scanStatus != null || uiState.error != null) {
+            // ── Scan-flow debug panel (debug builds only) ───────────────────
+            // Hidden in release builds; shows live status + error text on the
+            // phone so testing doesn't depend on Logcat.
+            if (com.vastra.BuildConfig.DEBUG && (uiState.scanStatus != null || uiState.error != null)) {
                 Spacer(Modifier.height(16.dp))
                 val isError = uiState.error != null
                 Surface(
