@@ -118,17 +118,31 @@ def detect_clothing(
         import torch
 
         inference_image = resize_for_inference(image, _DINO_MAX_SIDE)
-        t0 = time.perf_counter()
+
+        # ── Preprocessing (processor: resize/normalize/tokenize) ──────────────
+        t_pre = time.perf_counter()
         device = next(_grounding_dino_model.parameters()).device
         inputs = _grounding_dino_processor(
             images=inference_image,
             text=CLOTHING_PROMPT,
             return_tensors="pt",
         ).to(device)
+        pre_ms = (time.perf_counter() - t_pre) * 1000
 
+        # Log the ACTUAL pixel tensor shape entering the model — this reveals
+        # whether the processor internally rescales our resized image to a fixed
+        # size (in which case manual resize cannot reduce forward-pass cost).
+        pv = inputs.get("pixel_values")
+        pixel_shape = tuple(pv.shape) if pv is not None else None
+
+        # ── Model forward pass ────────────────────────────────────────────────
+        t_fwd = time.perf_counter()
         with torch.no_grad():
             outputs = _grounding_dino_model(**inputs)
+        fwd_ms = (time.perf_counter() - t_fwd) * 1000
 
+        # ── Postprocessing (threshold + decode) ───────────────────────────────
+        t_post = time.perf_counter()
         results = _grounding_dino_processor.post_process_grounded_object_detection(
             outputs,
             inputs.input_ids,
@@ -136,8 +150,13 @@ def detect_clothing(
             text_threshold=text_threshold,
             target_sizes=[inference_image.size[::-1]],
         )[0]
-        logger.info(f"timing dino-model-only: {(time.perf_counter() - t0)*1000:.0f}ms  "
-                    f"input={inference_image.width}x{inference_image.height}")
+        post_ms = (time.perf_counter() - t_post) * 1000
+
+        logger.info(
+            f"timing dino-split: preprocess={pre_ms:.0f}ms  forward={fwd_ms:.0f}ms  "
+            f"postprocess={post_ms:.0f}ms  pixel_values={pixel_shape}  "
+            f"requested_input={inference_image.width}x{inference_image.height}"
+        )
 
         w, h = inference_image.size
         raw: list[Detection] = []

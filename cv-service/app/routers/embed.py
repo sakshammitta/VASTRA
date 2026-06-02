@@ -3,7 +3,9 @@ import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.models.schemas import EmbedRequest, EmbedResponse, DetectedItem
+from app.models.schemas import (
+    EmbedRequest, EmbedResponse, DetectedItem, Detection, BoundingBox,
+)
 from app.services import detector, segmenter, embedder, r2_client as r2_module
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,37 @@ async def scan_and_embed(request: ScanAndEmbedRequest):
 
     items = _embed_detections(image, detections)
     logger.info(f"timing full-pipeline: {(time.perf_counter() - t0_total)*1000:.0f}ms  items={len(items)}")
+    return EmbedResponse(items=items)
+
+
+@router.post("/whole", response_model=EmbedResponse)
+async def classify_whole_image(request: ScanAndEmbedRequest):
+    """
+    FAST single-item path: skip Grounding-DINO entirely and run FashionCLIP on
+    the whole uploaded image. Intended for the Scan Closet flow, which instructs
+    the user to frame ONE item on a plain background — localization is
+    unnecessary there. Returns a single DetectedItem covering the full frame.
+
+    Use /embed/full (DINO + FashionCLIP) for multi-item / full-outfit photos
+    where localization is actually needed.
+    """
+    t0_total = time.perf_counter()
+
+    try:
+        t0 = time.perf_counter()
+        image = _r2.download_image(request.image_key)
+        logger.info(f"timing r2-fetch: {(time.perf_counter() - t0)*1000:.0f}ms  {image.width}x{image.height}")
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Image not found: {request.image_key}")
+
+    # Synthetic full-frame detection so the response shape matches /embed/full.
+    full_frame = Detection(
+        label="whole-image",
+        confidence=1.0,
+        bbox=BoundingBox(x_min=0.0, y_min=0.0, x_max=1.0, y_max=1.0),
+    )
+    items = _embed_detections(image, [full_frame])
+    logger.info(f"timing whole-image-pipeline: {(time.perf_counter() - t0_total)*1000:.0f}ms  items={len(items)}")
     return EmbedResponse(items=items)
 
 
