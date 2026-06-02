@@ -17,6 +17,9 @@ import java.util.stream.Collectors;
 @Service
 public class WardrobeService {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(WardrobeService.class);
+
     private final ClothingItemRepository itemRepo;
     private final UserRepository userRepo;
     private final R2Service r2Service;
@@ -51,7 +54,9 @@ public class WardrobeService {
 
     @Transactional
     public String initiateItemScan(UUID userId, MultipartFile image) throws IOException {
+        long t0 = System.currentTimeMillis();
         String imageKey = r2Service.upload(image, "scans/" + userId);
+        log.info("timing r2-upload: {}ms  key={}", System.currentTimeMillis() - t0, imageKey);
         String jobId = UUID.randomUUID().toString();
         scanJobService.processScanAsync(jobId, userId, imageKey);
         return jobId;

@@ -78,6 +78,7 @@ class WardrobeViewModel @Inject constructor(
             "scanImage() called: ${imageFile.absolutePath} exists=${imageFile.exists()} size=${imageFile.length()}B"
         )
         viewModelScope.launch {
+            val t0Total = System.currentTimeMillis()
             _uiState.update {
                 it.copy(
                     showAddSheet = false,
@@ -96,11 +97,12 @@ class WardrobeViewModel @Inject constructor(
             _uiState.update { it.copy(scanStatus = "Uploading to backend") }
             when (val result = repo.scanItem(imageFile)) {
                 is ApiResult.Success -> {
-                    android.util.Log.d("VastraScan", "scanImage: job started jobId=${result.data.jobId}")
+                    val jobId = result.data.jobId
+                    android.util.Log.d("VastraScan", "timing upload+accept: jobId=$jobId elapsed=${System.currentTimeMillis() - t0Total}ms")
                     _uiState.update {
-                        it.copy(scanStatus = "Scan job started", scanDebug = "jobId=${result.data.jobId}")
+                        it.copy(scanStatus = "Scan job started", scanDebug = "jobId=$jobId")
                     }
-                    pollScanJob(result.data.jobId)
+                    pollScanJob(jobId, t0Total)
                 }
                 is ApiResult.Error -> {
                     android.util.Log.e("VastraScan", "scanImage error [${result.code}]: ${result.message}")
@@ -127,7 +129,7 @@ class WardrobeViewModel @Inject constructor(
         }
     }
 
-    private fun pollScanJob(jobId: String) {
+    private fun pollScanJob(jobId: String, t0Total: Long = System.currentTimeMillis()) {
         viewModelScope.launch {
             _uiState.update { it.copy(scanStatus = "Waiting for detection") }
             var attempts = 0
@@ -144,6 +146,12 @@ class WardrobeViewModel @Inject constructor(
                         }
                         when (job.status) {
                             ScanStatus.COMPLETE -> {
+                                val totalMs = System.currentTimeMillis() - t0Total
+                                android.util.Log.d(
+                                    "VastraScan",
+                                    "timing TOTAL gallery→review: ${totalMs}ms  " +
+                                        "items=${job.detectedItems.size}  polls=$attempts"
+                                )
                                 // Pre-select all items; user can deselect the wrong ones.
                                 // Seed the editable fields with the CV predictions so the
                                 // user only changes what's wrong (e.g. jacket → t-shirt).

@@ -110,8 +110,9 @@ class WardrobeRepository @Inject constructor(private val api: VastraApiService) 
             "image", imageFile.name,
             imageFile.asRequestBody("image/*".toMediaType())
         )
+        val t0 = System.currentTimeMillis()
         val r = api.scanItem(part)
-        android.util.Log.d("VastraScan", "scanItem ← HTTP ${r.code()} success=${r.isSuccessful}")
+        android.util.Log.d("VastraScan", "timing upload+accept: ${System.currentTimeMillis() - t0}ms  HTTP ${r.code()}")
         if (r.isSuccessful) ApiResult.Success(r.body()!!)
         else ApiResult.Error(httpError("scan", r.code(), r.errorBody()?.string(), r.message()), r.code())
     } catch (e: Exception) {

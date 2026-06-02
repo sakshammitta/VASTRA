@@ -389,20 +389,15 @@ fun DetectedItemRow(
             }
 
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Low-confidence / unverified hint so the user knows to check it.
-                if (item.subtypeConfidence <= 0f) {
-                    Text(
-                        "Detected type — please verify",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = VastraError
-                    )
-                } else {
-                    Text(
-                        "Detected • ${(item.subtypeConfidence * 100).toInt()}% match",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = VastraMutedText
-                    )
-                }
+                // Always encourage the user to verify the AI suggestion regardless of
+                // confidence. The numeric score is kept internally but not shown — it
+                // looked like an outfit/style match percentage to users.
+                Text(
+                    if (item.subtypeConfidence <= 0f) "AI suggestion · Verify type before saving"
+                    else "AI suggestion · Please verify",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (item.subtypeConfidence <= 0f) VastraError else VastraMutedText
+                )
                 if (item.colorPalette.isNotEmpty()) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         item.colorPalette.take(3).forEach { hex ->
@@ -653,6 +648,7 @@ private fun parseHexColor(hex: String): Color = try {
 
 /** Copy a content URI to a temporary file so it can be sent as a multipart body. */
 fun Uri.toTempFile(context: Context): File {
+    val t0 = System.currentTimeMillis()
     val mime = context.contentResolver.getType(this)
     val input = context.contentResolver.openInputStream(this)!!
     val suffix = when (mime) {
@@ -664,7 +660,7 @@ fun Uri.toTempFile(context: Context): File {
     tmp.outputStream().use { input.copyTo(it) }
     android.util.Log.d(
         "VastraScan",
-        "toTempFile: uri=$this mime=$mime → ${tmp.absolutePath} size=${tmp.length()}B"
+        "timing uri→file: ${System.currentTimeMillis() - t0}ms  mime=$mime size=${tmp.length()}B"
     )
     return tmp
 }

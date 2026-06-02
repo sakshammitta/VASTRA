@@ -1,5 +1,6 @@
 import uuid
 import logging
+import time
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from PIL import Image
 import io
@@ -22,13 +23,17 @@ async def scan_image(request: ScanRequest):
     Run Grounding-DINO clothing detection on an image already uploaded to R2.
     Returns bounding boxes with labels and confidence scores.
     """
+    t0 = time.perf_counter()
     try:
         image = _r2.download_image(request.image_key)
     except Exception as e:
         logger.error(f"Failed to download image {request.image_key}: {e}")
         raise HTTPException(status_code=404, detail=f"Image not found: {request.image_key}")
+    t_fetch = time.perf_counter()
+    logger.info(f"timing r2-fetch: {(t_fetch - t0)*1000:.0f}ms  {image.width}x{image.height}")
 
     detections = detector.detect_clothing(image)
+    logger.info(f"timing dino-inference: {(time.perf_counter() - t_fetch)*1000:.0f}ms  detections={len(detections)}")
 
     return ScanResponse(
         job_id=str(uuid.uuid4()),

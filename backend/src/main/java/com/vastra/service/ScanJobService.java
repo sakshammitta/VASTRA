@@ -54,33 +54,34 @@ public class ScanJobService {
         try {
             job.put("status", "PROCESSING");
             redis.opsForValue().set(redisKey, job, TTL);
+            long t0Job = System.currentTimeMillis();
 
             log.info("scan job {} → POST {}/scan image_key={}", jobId, cvServiceUrl, r2ImageKey);
+            long t0 = System.currentTimeMillis();
             var scanRequest = Map.of("image_key", r2ImageKey);
             var scanResponse = restTemplate.postForObject(
                 cvServiceUrl + "/scan", scanRequest, Map.class
             );
-
             List<Map<String, Object>> detections = scanResponse != null
                 ? (List<Map<String, Object>>) scanResponse.getOrDefault("detections", List.of())
                 : List.of();
-            log.info("scan job {} ← /scan returned {} detection(s)", jobId, detections.size());
+            log.info("timing cv-scan (dino): {}ms  detections={}", System.currentTimeMillis() - t0, detections.size());
 
             log.info("scan job {} → POST {}/embed ({} detections)", jobId, cvServiceUrl, detections.size());
+            t0 = System.currentTimeMillis();
             var embedRequest = Map.of("image_key", r2ImageKey, "detections", detections);
             var embedResponse = restTemplate.postForObject(
                 cvServiceUrl + "/embed", embedRequest, Map.class
             );
-
             List<Map<String, Object>> detectedItems = embedResponse != null
                 ? (List<Map<String, Object>>) embedResponse.getOrDefault("items", List.of())
                 : List.of();
-            log.info("scan job {} ← /embed returned {} item(s)", jobId, detectedItems.size());
+            log.info("timing cv-embed (fashionclip): {}ms  items={}", System.currentTimeMillis() - t0, detectedItems.size());
 
             job.put("status", "COMPLETE");
             job.put("detectedItems", detectedItems);
             job.put("completedAt", Instant.now().toString());
-            log.info("scan job {} COMPLETE", jobId);
+            log.info("timing scan-job-total (r2-fetch+dino+fashionclip): {}ms  job={}", System.currentTimeMillis() - t0Job, jobId);
         } catch (Exception e) {
             log.error("scan job {} FAILED calling CV service at {}: {}", jobId, cvServiceUrl, e.toString());
             job.put("status", "FAILED");
