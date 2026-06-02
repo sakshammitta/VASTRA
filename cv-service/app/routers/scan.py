@@ -302,6 +302,234 @@ async def diagnose_outfit_detection(file: UploadFile = File(...)):
     )
 
 
+class CropInspection(BaseModel):
+    index: int
+    dino_label: str
+    dino_conf: float
+    bbox: dict                        # {x_min, y_min, x_max, y_max} normalized
+    area_fraction: float              # fraction of image area this box covers
+    fashionclip_category: str
+    fashionclip_subtype: str
+    fashionclip_conf: float
+    # Indices of other detections whose bbox significantly overlaps this one (IoU >= 0.3)
+    overlaps_with: list[int]
+    # Verdict: "keep" | "likely-duplicate" | "likely-fragment"
+    verdict: str
+    # base64-encoded JPEG of the crop (small, for visual inspection)
+    crop_jpeg_b64: str
+
+
+class WornInspectResponse(BaseModel):
+    image_width: int
+    image_height: int
+    prompt_used: str
+    box_threshold: float
+    text_threshold: float
+    raw_count: int                    # total raw detections before any filtering
+    crops: list[CropInspection]
+    # base64-encoded JPEG of the full image with bboxes drawn on it
+    annotated_jpeg_b64: str
+    # Which crop indices survive the overlap/area filters (not the production NMS)
+    suggested_keep: list[int]
+    summary: str
+
+
+@router.post("/diagnose/worn", response_model=WornInspectResponse)
+async def diagnose_worn_outfit(file: UploadFile = File(...)):
+    """
+    READ-ONLY. Runs the worn-outfit prompt at box=0.25, then for every raw
+    detection crops the region, runs FashionCLIP, and returns:
+      - DINO label + confidence
+      - FashionCLIP category / subtype / confidence
+      - bbox area as fraction of image (small = fragment)
+      - overlap with other detections (high = likely duplicate)
+      - a "keep / likely-duplicate / likely-fragment" verdict
+      - base64 JPEG of each crop for visual inspection
+      - an annotated copy of the full image
+
+    Nothing is persisted. No R2, no Redis, no Postgres writes.
+
+    Example:
+        curl -s -X POST http://localhost:8000/scan/diagnose/worn \\
+             -F "file=@outfit.jpg" | python3 -m json.tool > worn_result.json
+        python3 -c "
+        import json, base64
+        d = json.load(open('worn_result.json'))
+        open('annotated.jpg','wb').write(base64.b64decode(d['annotated_jpeg_b64']))
+        for c in d['crops']:
+            open(f'crop_{c[\"index\"]}_{c[\"fashionclip_subtype\"]}.jpg','wb').write(
+                base64.b64decode(c['crop_jpeg_b64']))
+        "
+    """
+    import base64
+    from PIL import ImageDraw, ImageFont
+    from app.services.detector import (
+        _grounding_dino_model as _dino_model,
+        _grounding_dino_processor as _dino_proc,
+        resize_for_inference, _DINO_MAX_SIDE,
+    )
+    from app.models.schemas import BoundingBox
+
+    try:
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
+
+    if not detector.is_loaded():
+        raise HTTPException(status_code=503, detail="Grounding-DINO model not loaded")
+
+    import torch
+    BOX_T, TEXT_T = 0.25, 0.20
+    PROMPT = _WORN_OUTFIT_PROMPT
+
+    inf_img = resize_for_inference(image, _DINO_MAX_SIDE)
+    device = next(_dino_model.parameters()).device
+    inputs = _dino_proc(images=inf_img, text=PROMPT, return_tensors="pt").to(device)
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        outputs = _dino_model(**inputs)
+    logger.info(f"timing worn-inspect-forward: {(time.perf_counter()-t0)*1000:.0f}ms")
+
+    results = _dino_proc.post_process_grounded_object_detection(
+        outputs, inputs.input_ids,
+        box_threshold=BOX_T, text_threshold=TEXT_T,
+        target_sizes=[inf_img.size[::-1]],
+    )[0]
+
+    iw, ih = inf_img.size
+    raw_dets = []
+    for box, score, label in zip(results["boxes"], results["scores"], results["labels"]):
+        x1, y1, x2, y2 = box.tolist()
+        raw_dets.append({
+            "label": str(label).strip(),
+            "conf":  round(float(score), 4),
+            "x_min": round(max(0.0, x1 / iw), 4),
+            "y_min": round(max(0.0, y1 / ih), 4),
+            "x_max": round(min(1.0, x2 / iw), 4),
+            "y_max": round(min(1.0, y2 / ih), 4),
+        })
+    raw_dets.sort(key=lambda d: d["conf"], reverse=True)
+
+    def _iou(a: dict, b: dict) -> float:
+        ix1 = max(a["x_min"], b["x_min"]); iy1 = max(a["y_min"], b["y_min"])
+        ix2 = min(a["x_max"], b["x_max"]); iy2 = min(a["y_max"], b["y_max"])
+        inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+        if inter == 0.0:
+            return 0.0
+        aa = (a["x_max"]-a["x_min"]) * (a["y_max"]-a["y_min"])
+        ab = (b["x_max"]-b["x_min"]) * (b["y_max"]-b["y_min"])
+        return inter / (aa + ab - inter)
+
+    OVERLAP_FLAG_THRESHOLD = 0.30   # IoU above this → flag as overlapping
+    FRAGMENT_AREA_MAX = 0.04        # boxes covering <4% of image → flag as fragment
+
+    # Build overlap map
+    n = len(raw_dets)
+    overlaps: list[list[int]] = [[] for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _iou(raw_dets[i], raw_dets[j]) >= OVERLAP_FLAG_THRESHOLD:
+                overlaps[i].append(j)
+                overlaps[j].append(i)
+
+    crops: list[CropInspection] = []
+    full_w, full_h = image.size
+    COLORS = ["#FF3300","#0055FF","#00AA44","#FF8800","#AA00FF","#00CCCC","#FF0088"]
+
+    for idx, det in enumerate(raw_dets):
+        bbox = BoundingBox(
+            x_min=det["x_min"], y_min=det["y_min"],
+            x_max=det["x_max"], y_max=det["y_max"],
+        )
+        area_frac = round((det["x_max"]-det["x_min"]) * (det["y_max"]-det["y_min"]), 4)
+
+        crop_img = segmenter.segment_crop(image, bbox)
+
+        if embedder.is_loaded():
+            fc_cat, fc_sub, fc_conf = embedder.classify_subtype(crop_img, det["label"])
+            fc_cat_str = fc_cat.value
+        else:
+            fc_cat_str, fc_sub, fc_conf = "UNKNOWN", det["label"], 0.0
+
+        # Verdict heuristic — for inspection only, not production filtering
+        if area_frac < FRAGMENT_AREA_MAX:
+            verdict = "likely-fragment"
+        elif overlaps[idx]:
+            # If a higher-confidence detection already covers this region, flag as duplicate
+            dominated = any(
+                raw_dets[j]["conf"] > det["conf"]
+                for j in overlaps[idx]
+            )
+            verdict = "likely-duplicate" if dominated else "keep"
+        else:
+            verdict = "keep"
+
+        buf = io.BytesIO()
+        crop_img.convert("RGB").save(buf, format="JPEG", quality=80)
+        crop_b64 = base64.b64encode(buf.getvalue()).decode()
+
+        crops.append(CropInspection(
+            index=idx,
+            dino_label=det["label"],
+            dino_conf=det["conf"],
+            bbox={"x_min": det["x_min"], "y_min": det["y_min"],
+                  "x_max": det["x_max"], "y_max": det["y_max"]},
+            area_fraction=area_frac,
+            fashionclip_category=fc_cat_str,
+            fashionclip_subtype=fc_sub,
+            fashionclip_conf=round(fc_conf, 4),
+            overlaps_with=overlaps[idx],
+            verdict=verdict,
+            crop_jpeg_b64=crop_b64,
+        ))
+
+    # Annotated full image
+    ann = image.copy()
+    draw = ImageDraw.Draw(ann)
+    for idx, det in enumerate(raw_dets):
+        c = crops[idx]
+        color = COLORS[idx % len(COLORS)]
+        x1 = int(det["x_min"] * full_w); y1 = int(det["y_min"] * full_h)
+        x2 = int(det["x_max"] * full_w); y2 = int(det["y_max"] * full_h)
+        width = 4 if c.verdict == "keep" else 2
+        draw.rectangle([x1, y1, x2, y2], outline=color, width=width)
+        label_text = (
+            f"#{idx} {c.fashionclip_subtype} {c.fashionclip_conf:.2f}"
+            f" [{c.verdict}]"
+        )
+        draw.rectangle([x1, y1, x1 + len(label_text)*7, y1 + 16], fill=color)
+        draw.text((x1 + 2, y1 + 1), label_text, fill="white")
+
+    ann_buf = io.BytesIO()
+    ann.save(ann_buf, format="JPEG", quality=85)
+    ann_b64 = base64.b64encode(ann_buf.getvalue()).decode()
+
+    suggested_keep = [c.index for c in crops if c.verdict == "keep"]
+    keep_summary = ", ".join(
+        f"#{c.index} {c.fashionclip_subtype}({c.fashionclip_conf:.2f})"
+        for c in crops if c.verdict == "keep"
+    ) or "none"
+    summary = (
+        f"{len(raw_dets)} raw detections; {len(suggested_keep)} flagged keep: {keep_summary}. "
+        f"Duplicates/fragments: {len(raw_dets)-len(suggested_keep)}. "
+        "Verdicts are heuristic — review crops to confirm before any production change."
+    )
+
+    return WornInspectResponse(
+        image_width=image.width,
+        image_height=image.height,
+        prompt_used=PROMPT,
+        box_threshold=BOX_T,
+        text_threshold=TEXT_T,
+        raw_count=len(raw_dets),
+        crops=crops,
+        annotated_jpeg_b64=ann_b64,
+        suggested_keep=suggested_keep,
+        summary=summary,
+    )
+
+
 @router.post("/upload", response_model=ScanResponse)
 async def scan_uploaded_image(file: UploadFile = File(...)):
     """
