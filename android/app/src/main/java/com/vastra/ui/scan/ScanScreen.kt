@@ -315,10 +315,18 @@ fun ScanScreen(
                 selectedIndices = uiState.selectedDetectedIndices,
                 editedCategories = uiState.editedCategories,
                 editedSubcategories = uiState.editedSubcategories,
+                imageSourceStates = uiState.imageSourceStates,
                 isConfirming = uiState.isConfirming,
                 onToggle = { viewModel.toggleDetectedItem(it) },
                 onCategoryChange = { i, c -> viewModel.setItemCategory(i, c) },
                 onSubcategoryChange = { i, s -> viewModel.setItemSubcategory(i, s) },
+                onStartCleanImages = { viewModel.startCleanImageForSelected() },
+                onConfirmWebMatch = { viewModel.confirmWebMatch(it) },
+                onShowNextWebCandidate = { viewModel.showNextWebCandidate(it) },
+                onRejectWebMatch = { viewModel.rejectWebMatch(it) },
+                onConfirmAiRender = { viewModel.confirmAiRender(it) },
+                onRegenerateAiRender = { viewModel.requestAiRender(it) },
+                onTryAnotherMatch = { viewModel.tryAnotherMatch(it) },
                 onConfirm = {
                     viewModel.confirmSelectedItems()
                     onFinishToWardrobe()
