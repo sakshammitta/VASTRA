@@ -12,7 +12,10 @@ public class ClothingItemDto {
         String imageUrl, String thumbnailUrl, String category, String subCategory,
         List<String> tags, List<String> colorPalette, String brand,
         String purchasePlatform, String purchaseUrl, BigDecimal priceUsd,
-        int styleMatchPercent, String addedAt
+        int styleMatchPercent, String addedAt,
+        // Provenance of imageUrl: CROP (real crop), WEB_PRODUCT (confirmed match),
+        // or AI_RENDER (generated). Lets the app badge non-real display images.
+        String displayImageSource
     ) {
         public static ClothingItemResponse from(ClothingItemEntity item, String imageUrl, String thumbnailUrl) {
             return new ClothingItemResponse(
@@ -25,7 +28,8 @@ public class ClothingItemDto {
                 item.getBrand(),
                 item.getPurchasePlatform(), item.getPurchaseUrl(), item.getPriceUsd(),
                 item.getStyleMatchPercent(),
-                item.getAddedAt() != null ? item.getAddedAt().toString() : null
+                item.getAddedAt() != null ? item.getAddedAt().toString() : null,
+                item.getDisplayImageSource() != null ? item.getDisplayImageSource().name() : "CROP"
             );
         }
     }

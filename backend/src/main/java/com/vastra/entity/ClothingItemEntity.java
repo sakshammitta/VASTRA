@@ -34,6 +34,16 @@ public class ClothingItemEntity {
     @Column(name = "r2_thumbnail_key")
     private String r2ThumbnailKey;
 
+    // ── Display layer (separate from the truth crop in r2ImageKey) ────────────
+    // The image actually shown in the app. NULL until a cleaner display image
+    // (confirmed web product match or AI render) is set; falls back to the crop.
+    @Column(name = "display_image_key")
+    private String displayImageKey;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "display_image_source", nullable = false)
+    private DisplayImageSource displayImageSource = DisplayImageSource.CROP;
+
     @Enumerated(EnumType.STRING)
     private ClothingCategory category;
 
@@ -160,6 +170,31 @@ public class ClothingItemEntity {
 
     public void setR2ThumbnailKey(String r2ThumbnailKey) {
         this.r2ThumbnailKey = r2ThumbnailKey;
+    }
+
+    public String getDisplayImageKey() {
+        return displayImageKey;
+    }
+
+    public void setDisplayImageKey(String displayImageKey) {
+        this.displayImageKey = displayImageKey;
+    }
+
+    public DisplayImageSource getDisplayImageSource() {
+        return displayImageSource;
+    }
+
+    public void setDisplayImageSource(DisplayImageSource displayImageSource) {
+        this.displayImageSource = displayImageSource;
+    }
+
+    /**
+     * The image key to actually render in the app: the confirmed cleaner display
+     * image when present, otherwise the real extracted crop (truth). Never null
+     * unless the crop itself is missing.
+     */
+    public String getEffectiveImageKey() {
+        return displayImageKey != null ? displayImageKey : r2ImageKey;
     }
 
     public ClothingCategory getCategory() {

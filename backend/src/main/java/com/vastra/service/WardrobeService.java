@@ -51,7 +51,7 @@ public class WardrobeService {
             items = itemRepo.findByOwnerIdOrderByAddedAtDesc(userId);
         }
         return items.stream().map(i -> ClothingItemDto.ClothingItemResponse.from(i,
-            r2Service.getPresignedUrl(i.getR2ImageKey()),
+            r2Service.getPresignedUrl(i.getEffectiveImageKey()),
             r2Service.getPresignedUrl(i.getR2ThumbnailKey())
         )).toList();
     }
