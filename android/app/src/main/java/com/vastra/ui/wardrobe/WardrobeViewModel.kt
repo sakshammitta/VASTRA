@@ -38,6 +38,13 @@ import javax.inject.Inject
  *                      ─► DisplayImagePending (render failed / not configured)
  */
 sealed class ImageSourceState {
+    /**
+     * Initial state. No external call has been made. The user must explicitly
+     * tap "Create clean wardrobe images" before any web search or render runs —
+     * nothing happens automatically on scan completion.
+     */
+    object NotStarted : ImageSourceState()
+
     /** SERPAPI Google Lens search in progress. */
     object SearchingWeb : ImageSourceState()
 
@@ -231,8 +238,10 @@ class WardrobeViewModel @Inject constructor(
                                         scanDebug = job.detectedItems.joinToString { "${it.category}/${it.subCategory}" }
                                     )
                                 }
-                                // Auto-start web match search for every detected item
-                                job.detectedItems.indices.forEach { i -> requestWebMatch(jobId, i) }
+                                // NOTE: web matching is NOT auto-started. The user
+                                // first selects/corrects items, then explicitly taps
+                                // "Create clean wardrobe images" — no external API
+                                // calls happen on scan completion.
                                 return@launch
                             }
                             ScanStatus.FAILED -> {
@@ -333,29 +342,61 @@ class WardrobeViewModel @Inject constructor(
         _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to state)) }
     }
 
+    /** The user-corrected category for an item, falling back to the CV guess. */
+    private fun correctedCategory(index: Int): ClothingCategory? {
+        val s = _uiState.value
+        return s.editedCategories[index] ?: s.pendingConfirmJob?.detectedItems?.getOrNull(index)?.category
+    }
+
+    /** The user-corrected subtype for an item, falling back to the CV guess. */
+    private fun correctedSubtype(index: Int): String? {
+        val s = _uiState.value
+        return (s.editedSubcategories[index]?.takeIf { it.isNotBlank() })
+            ?: s.pendingConfirmJob?.detectedItems?.getOrNull(index)?.subCategory?.takeIf { it.isNotBlank() }
+    }
+
     /**
-     * Start the SerpAPI Google Lens search. Auto-started on scan complete; safe
-     * to call again ("Try another match"). Sends only the garment crop URL.
-     * Candidates are NEVER auto-confirmed — the user must tap "Yes, use this".
+     * EXPLICIT user action ("Create clean wardrobe images"). Starts the web-match
+     * search for every SELECTED item only — never automatically. This is the
+     * single entry point that may trigger external API calls, and only after the
+     * user has selected/corrected the real items.
+     */
+    fun startCleanImageForSelected() {
+        val jobId = _uiState.value.pendingJobId ?: return
+        _uiState.value.selectedDetectedIndices.sorted().forEach { index ->
+            requestWebMatch(jobId, index)
+        }
+    }
+
+    /**
+     * Start the SerpAPI Google Lens search for one item. Only ever called from an
+     * explicit user action (the "Create clean wardrobe images" button or "Try
+     * another match"). Sends only the garment crop URL plus the user-corrected
+     * identity. Candidates are NEVER auto-confirmed.
      */
     fun requestWebMatch(jobId: String, index: Int) {
         setImageState(index, ImageSourceState.SearchingWeb)
         viewModelScope.launch {
-            when (val result = repo.requestWebMatch(jobId, index)) {
+            when (val result = repo.requestWebMatch(jobId, index, correctedCategory(index), correctedSubtype(index))) {
                 is ApiResult.Success -> {
                     val r = result.data
-                    when {
+                    // Do NOT auto-chain to AI render — that would be a second
+                    // (paid) call without an explicit tap. On no match / not
+                    // configured, drop to PENDING; the user explicitly taps
+                    // "Generate clean image" from there if they want a render.
+                    val newState = when {
                         !r.available ->
-                            // SerpAPI not configured — go straight to AI render path.
-                            requestAiRender(index)
+                            ImageSourceState.DisplayImagePending(
+                                "Web matching is off · set SERPAPI_KEY to enable")
                         r.candidates.isEmpty() ->
-                            // No visual matches — fall through to AI render.
-                            requestAiRender(index)
+                            ImageSourceState.DisplayImagePending("No product match found")
                         else ->
-                            setImageState(index, ImageSourceState.WebCandidatesAvailable(r.candidates))
+                            ImageSourceState.WebCandidatesAvailable(r.candidates)
                     }
+                    setImageState(index, newState)
                 }
-                is ApiResult.Error -> requestAiRender(index)
+                is ApiResult.Error ->
+                    setImageState(index, ImageSourceState.DisplayImagePending("Web match failed"))
             }
         }
     }
@@ -387,7 +428,7 @@ class WardrobeViewModel @Inject constructor(
         val jobId = _uiState.value.pendingJobId ?: return
         setImageState(index, ImageSourceState.GeneratingAiRender)
         viewModelScope.launch {
-            when (val result = repo.requestAiRender(jobId, index)) {
+            when (val result = repo.requestAiRender(jobId, index, correctedCategory(index), correctedSubtype(index))) {
                 is ApiResult.Success -> {
                     val r = result.data
                     if (!r.available || r.renderUrl == null || r.renderKey == null) {

@@ -225,6 +225,7 @@ fun WardrobeScreen(
                 onToggle = { viewModel.toggleDetectedItem(it) },
                 onCategoryChange = { i, c -> viewModel.setItemCategory(i, c) },
                 onSubcategoryChange = { i, s -> viewModel.setItemSubcategory(i, s) },
+                onStartCleanImages = { viewModel.startCleanImageForSelected() },
                 onConfirmWebMatch = { viewModel.confirmWebMatch(it) },
                 onShowNextWebCandidate = { viewModel.showNextWebCandidate(it) },
                 onRejectWebMatch = { viewModel.rejectWebMatch(it) },
@@ -282,6 +283,7 @@ fun ScanResultSelectionSheet(
     onToggle: (Int) -> Unit,
     onCategoryChange: (Int, ClothingCategory) -> Unit,
     onSubcategoryChange: (Int, String) -> Unit,
+    onStartCleanImages: () -> Unit,
     onConfirmWebMatch: (Int) -> Unit,
     onShowNextWebCandidate: (Int) -> Unit,
     onRejectWebMatch: (Int) -> Unit,
@@ -336,7 +338,7 @@ fun ScanResultSelectionSheet(
                         category = editedCategories[index] ?: item.category,
                         subCategory = editedSubcategories[index] ?: item.subCategory,
                         aiSuggestion = item.subCategory,
-                        imageSourceState = imageSourceStates[index] ?: ImageSourceState.SearchingWeb,
+                        imageSourceState = imageSourceStates[index] ?: ImageSourceState.NotStarted,
                         onToggle = { onToggle(index) },
                         onCategoryChange = { onCategoryChange(index, it) },
                         onSubcategoryChange = { onSubcategoryChange(index, it) },
@@ -353,10 +355,43 @@ fun ScanResultSelectionSheet(
                 }
             }
 
-            // ── Pinned confirm button ────────────────────────────────────────
-            Spacer(Modifier.height(16.dp))
+            // ── Pinned actions ───────────────────────────────────────────────
+            Spacer(Modifier.height(12.dp))
 
             val count = selectedIndices.size
+
+            // Explicit, user-initiated clean-image action. NOTHING external runs
+            // until this is tapped — and only for the selected/corrected items,
+            // using their confirmed identity (e.g. joggers, not trousers).
+            val anyNotStarted = selectedIndices.any {
+                (imageSourceStates[it] ?: ImageSourceState.NotStarted) is ImageSourceState.NotStarted
+            }
+            if (anyNotStarted) {
+                OutlinedButton(
+                    onClick = onStartCleanImages,
+                    enabled = count > 0 && !isConfirming,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, VastraInk)
+                ) {
+                    Icon(Icons.Outlined.AutoAwesome, null, modifier = Modifier.size(18.dp), tint = VastraInk)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (count == 0) "Select items first"
+                        else "Create clean wardrobe images",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = VastraInk
+                    )
+                }
+                Text(
+                    "Searches the web / generates a clean image only for the items you select. No external calls happen until you tap this.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = VastraMutedText,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+                Spacer(Modifier.height(10.dp))
+            }
+
             Button(
                 onClick = onConfirm,
                 enabled = count > 0 && !isConfirming,
@@ -527,6 +562,13 @@ private fun ImageSourceSection(
             Text("Wardrobe image", style = MaterialTheme.typography.labelSmall, color = VastraMutedText)
 
             when (state) {
+                is ImageSourceState.NotStarted ->
+                    Text(
+                        "Pending · tap \"Create clean wardrobe images\" below to find a product match or generate a clean image.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = VastraMutedText
+                    )
+
                 is ImageSourceState.SearchingWeb ->
                     LoadingRow("Finding product match...")
 

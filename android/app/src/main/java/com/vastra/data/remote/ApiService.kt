@@ -72,18 +72,22 @@ interface VastraApiService {
         @Body request: ConfirmScanItemRequest
     ): Response<ClothingItem>
 
-    /** Runs SerpAPI Google Lens on the detected crop; returns visual-match candidates. */
+    /** Runs SerpAPI Google Lens on the detected crop; returns visual-match candidates.
+     *  Body carries the user-corrected identity so matching uses e.g. "joggers". */
     @POST("api/wardrobe/scan/{jobId}/items/{itemIndex}/web-match")
     suspend fun requestWebMatch(
         @Path("jobId") jobId: String,
-        @Path("itemIndex") itemIndex: Int
+        @Path("itemIndex") itemIndex: Int,
+        @Body request: EnhanceImageRequest
     ): Response<WebMatchResponse>
 
-    /** Calls gpt-image-1 to generate a clean product image; uploads to R2. */
+    /** Image-edit render grounded in the crop; uploads to R2. Body carries
+     *  the user-corrected identity so the render reflects e.g. "joggers". */
     @POST("api/wardrobe/scan/{jobId}/items/{itemIndex}/ai-render")
     suspend fun requestAiRender(
         @Path("jobId") jobId: String,
-        @Path("itemIndex") itemIndex: Int
+        @Path("itemIndex") itemIndex: Int,
+        @Body request: EnhanceImageRequest
     ): Response<AiRenderResponse>
 
     @GET("api/recommendations/swipe")
@@ -131,6 +135,11 @@ data class ConfirmScanItemRequest(
     val webMatchImageUrl: String? = null,
     val aiRenderKey: String? = null,
     val webMatchSourceUrl: String? = null
+)
+data class EnhanceImageRequest(
+    val category: String? = null,
+    val subCategory: String? = null,
+    val brand: String? = null
 )
 data class SwipeRequest(val itemId: String, val direction: SwipeDirection)
 data class AddCommentRequest(val text: String)

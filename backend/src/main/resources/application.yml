@@ -78,6 +78,7 @@ vastra:
 
   openai:
     api-key: ${OPENAI_API_KEY:}
+    image-model: ${OPENAI_IMAGE_MODEL:gpt-image-2}
 
 logging:
   level:

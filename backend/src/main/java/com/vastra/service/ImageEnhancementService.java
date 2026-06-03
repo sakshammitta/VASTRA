@@ -6,14 +6,16 @@ import com.vastra.dto.ClothingItemDto.WebMatchCandidate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Produces clean e-commerce-quality wardrobe images via two strategies:
@@ -46,6 +48,9 @@ public class ImageEnhancementService {
 
     @Value("${vastra.openai.api-key:}")
     private String openAiKey;
+
+    @Value("${vastra.openai.image-model:gpt-image-2}")
+    private String openAiImageModel;
 
     private final RestClient restClient = RestClient.create();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -101,11 +106,21 @@ public class ImageEnhancementService {
     }
 
     /**
-     * Generate a clean fashion product image with gpt-image-2.
+     * Generate a clean fashion product image, VISUALLY GROUNDED in the detected
+     * garment crop. Uses the OpenAI images/EDITS endpoint (not text-only
+     * generations): the internal crop is sent as the image input together with a
+     * prompt built from the user-confirmed attributes, so the render preserves
+     * the actual color / type / silhouette / visible brand graphic of the item
+     * the user owns — not a generic stock garment.
+     *
+     * @param cropPresignedUrl short-lived R2 URL of the detected garment crop
+     *                         (item-crops/…), used only as the edit reference.
+     * @param category         user-CONFIRMED category (e.g. "BOTTOM")
+     * @param subCategory      user-CONFIRMED subtype (e.g. "joggers", not the AI's "trousers")
      * Uploads the result to R2 and returns the R2 key, or null on failure.
      */
     public String generateAiRender(
-            String category, String subCategory,
+            String cropPresignedUrl, String category, String subCategory,
             List<String> colorPalette, String brand) {
 
         if (openAiKey.isBlank()) return null;
@@ -115,29 +130,41 @@ public class ImageEnhancementService {
         String brandDesc  = (brand != null && !brand.isBlank()) ? brand + " " : "";
         String garment    = subCategory.isBlank() ? category.toLowerCase() : subCategory;
         String prompt     = String.format(
-            "Realistic fashion e-commerce product photograph of a %s%s%s. " +
-            "Upright, centered, isolated garment on a clean plain neutral background. " +
-            "No person, no body parts, no hands, no arms, no phone, no background scene, " +
-            "no crop fragments. Preserve the garment's color, type and any visible brand " +
-            "graphic as faithfully as possible. Professional product shot, Zara / H&M / " +
-            "ASOS online store style. High quality.",
+            "Turn this into a realistic fashion e-commerce product photograph of the same " +
+            "%s%s%s shown in the reference image. Keep the exact color, type, silhouette and " +
+            "any visible logo or graphic faithful to the reference. Present the garment upright, " +
+            "centered, isolated on a clean opaque neutral background. Remove any person, body " +
+            "parts, hands, arms, phone, and background scene. Professional product shot, " +
+            "Zara / H&M / ASOS online store style. High quality.",
             brandDesc, garment, colorDesc
         );
 
         try {
-            String requestJson = objectMapper.writeValueAsString(Map.of(
-                "model", "gpt-image-2",
-                "prompt", prompt,
-                "n", 1,
-                "size", "1024x1024",
-                "response_format", "b64_json"
-            ));
+            // Download the crop to send as the image-edit reference input.
+            byte[] cropBytes = restClient.get()
+                .uri(cropPresignedUrl)
+                .retrieve()
+                .body(byte[].class);
+            if (cropBytes == null || cropBytes.length == 0) {
+                log.warn("ai-render: crop download empty, cannot ground render");
+                return null;
+            }
+
+            MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
+            form.add("model", openAiImageModel);
+            form.add("prompt", prompt);
+            form.add("n", "1");
+            form.add("size", "1024x1024");
+            ByteArrayResource imagePart = new ByteArrayResource(cropBytes) {
+                @Override public String getFilename() { return "reference.png"; }
+            };
+            form.add("image", imagePart);
 
             String responseJson = restClient.post()
-                .uri("https://api.openai.com/v1/images/generations")
+                .uri("https://api.openai.com/v1/images/edits")
                 .header("Authorization", "Bearer " + openAiKey)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(requestJson)
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(form)
                 .retrieve()
                 .body(String.class);
 
@@ -146,10 +173,10 @@ public class ImageEnhancementService {
             byte[] imgBytes = Base64.getDecoder().decode(b64);
 
             String r2Key = r2Service.uploadBytes(imgBytes, "wardrobe-renders", "image/png");
-            log.info("ai-render: {} bytes → R2 key={}", imgBytes.length, r2Key);
+            log.info("ai-render (edit, model={}): {} bytes → R2 key={}", openAiImageModel, imgBytes.length, r2Key);
             return r2Key;
         } catch (Exception e) {
-            log.error("ai-render failed for {}/{}: {}", category, subCategory, e.getMessage());
+            log.error("ai-render failed for {}/{} (model={}): {}", category, subCategory, openAiImageModel, e.getMessage());
             return null;
         }
     }

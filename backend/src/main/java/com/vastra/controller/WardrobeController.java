@@ -97,7 +97,8 @@ public class WardrobeController {
     @PostMapping("/scan/{jobId}/items/{itemIndex}/web-match")
     public ResponseEntity<ClothingItemDto.WebMatchResponse> requestWebMatch(
             @PathVariable String jobId,
-            @PathVariable int itemIndex) {
+            @PathVariable int itemIndex,
+            @RequestBody(required = false) ClothingItemDto.EnhanceImageRequest req) {
 
         if (!imageEnhancementService.isWebMatchAvailable()) {
             return ResponseEntity.ok(new ClothingItemDto.WebMatchResponse(List.of(), false));
@@ -113,14 +114,22 @@ public class WardrobeController {
         Map<String, Object> detected = items.get(itemIndex);
         String cropKey    = (String) detected.get("crop_key");
         String cropUrl    = r2Service.getPresignedUrl(cropKey);
-        String category   = (String) detected.getOrDefault("category", "OTHER");
-        String subCat     = (String) detected.getOrDefault("sub_category", "");
+        // Prefer the user-corrected identity (e.g. "joggers") over the CV guess.
+        String category   = override(req != null ? req.category() : null,
+                                     (String) detected.getOrDefault("category", "OTHER"));
+        String subCat     = override(req != null ? req.subCategory() : null,
+                                     (String) detected.getOrDefault("sub_category", ""));
+        String brand      = req != null ? req.brand() : null;
         List<String> colors = (List<String>) detected.getOrDefault("color_palette", List.of());
 
         List<ClothingItemDto.WebMatchCandidate> candidates =
-            imageEnhancementService.searchWebMatches(cropUrl, category, subCat, colors, null);
+            imageEnhancementService.searchWebMatches(cropUrl, category, subCat, colors, brand);
 
         return ResponseEntity.ok(new ClothingItemDto.WebMatchResponse(candidates, true));
+    }
+
+    private static String override(String corrected, String fallback) {
+        return (corrected != null && !corrected.isBlank()) ? corrected : fallback;
     }
 
     /**
@@ -135,7 +144,8 @@ public class WardrobeController {
     @PostMapping("/scan/{jobId}/items/{itemIndex}/ai-render")
     public ResponseEntity<ClothingItemDto.AiRenderResponse> requestAiRender(
             @PathVariable String jobId,
-            @PathVariable int itemIndex) {
+            @PathVariable int itemIndex,
+            @RequestBody(required = false) ClothingItemDto.EnhanceImageRequest req) {
 
         if (!imageEnhancementService.isAiRenderAvailable()) {
             return ResponseEntity.ok(new ClothingItemDto.AiRenderResponse(null, null, false));
@@ -149,11 +159,18 @@ public class WardrobeController {
         if (itemIndex < 0 || itemIndex >= items.size()) return ResponseEntity.badRequest().build();
 
         Map<String, Object> detected = items.get(itemIndex);
-        String category   = (String) detected.getOrDefault("category", "OTHER");
-        String subCat     = (String) detected.getOrDefault("sub_category", "");
+        // The crop is the visual-grounding input for the image-edit render.
+        String cropKey    = (String) detected.get("crop_key");
+        String cropUrl    = r2Service.getPresignedUrl(cropKey);
+        // Prefer the user-corrected identity (e.g. "joggers") over the CV guess.
+        String category   = override(req != null ? req.category() : null,
+                                     (String) detected.getOrDefault("category", "OTHER"));
+        String subCat     = override(req != null ? req.subCategory() : null,
+                                     (String) detected.getOrDefault("sub_category", ""));
+        String brand      = req != null ? req.brand() : null;
         List<String> colors = (List<String>) detected.getOrDefault("color_palette", List.of());
 
-        String renderKey = imageEnhancementService.generateAiRender(category, subCat, colors, null);
+        String renderKey = imageEnhancementService.generateAiRender(cropUrl, category, subCat, colors, brand);
         if (renderKey == null) {
             return ResponseEntity.ok(new ClothingItemDto.AiRenderResponse(null, null, true));
         }

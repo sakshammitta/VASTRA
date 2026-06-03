@@ -62,6 +62,18 @@ public class ClothingItemDto {
         String webMatchSourceUrl
     ) {}
 
+    /**
+     * Optional corrected-identity overrides sent to the web-match and ai-render
+     * endpoints. Lets matching/rendering use the user's CONFIRMED attributes
+     * (e.g. "joggers") instead of the CV guess (e.g. "trousers"). All nullable —
+     * omitted fields fall back to the CV prediction stored in the scan job.
+     */
+    public record EnhanceImageRequest(
+        String category,
+        String subCategory,
+        String brand
+    ) {}
+
     /** One visual match candidate returned by the web-match endpoint. */
     public record WebMatchCandidate(
         String title,
