@@ -199,7 +199,11 @@ fun WardrobeScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(uiState.items, key = { it.id }) { item ->
-                        ClothingItemCard(item = item, onDelete = { viewModel.deleteItem(item.id) })
+                        ClothingItemCard(
+                            item = item,
+                            onDelete = { viewModel.deleteItem(item.id) },
+                            onEnhance = { viewModel.openEnhanceSheet(item) }
+                        )
                     }
                 }
             }
@@ -235,6 +239,91 @@ fun WardrobeScreen(
                 onConfirm = { viewModel.confirmSelectedItems() },
                 onDismiss = { viewModel.dismissScanResult() }
             )
+        }
+
+        // ── Enhance-a-saved-item sheet (clean image for an existing PENDING item)
+        uiState.enhancingItem?.let { item ->
+            EnhanceItemSheet(
+                item = item,
+                state = uiState.enhanceImageState,
+                isSaving = uiState.isSavingDisplayImage,
+                onStart = { viewModel.enhanceStartWebMatch() },
+                onConfirmWebMatch = { viewModel.enhanceConfirmWebMatch() },
+                onShowNextWebCandidate = { viewModel.enhanceShowNextCandidate() },
+                onRejectWebMatch = { viewModel.enhanceRejectWebMatch() },
+                onConfirmAiRender = { viewModel.enhanceConfirmAiRender() },
+                onRegenerateAiRender = { viewModel.enhanceRequestAiRender() },
+                onTryAnotherMatch = { viewModel.enhanceTryAnotherMatch() },
+                onDismiss = { viewModel.closeEnhanceSheet() }
+            )
+        }
+    }
+}
+
+/**
+ * Bottom sheet to enhance an ALREADY-SAVED wardrobe item with a clean display
+ * image — without rescanning. Reuses the same [ImageSourceSection] state machine
+ * as the scan review flow. Confirming a web match or approving an AI render
+ * commits immediately (the sheet closes and the wardrobe refreshes).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EnhanceItemSheet(
+    item: ClothingItem,
+    state: ImageSourceState,
+    isSaving: Boolean,
+    onStart: () -> Unit,
+    onConfirmWebMatch: () -> Unit,
+    onShowNextWebCandidate: () -> Unit,
+    onRejectWebMatch: () -> Unit,
+    onConfirmAiRender: () -> Unit,
+    onRegenerateAiRender: () -> Unit,
+    onTryAnotherMatch: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = VastraCream) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Create clean image", style = MaterialTheme.typography.headlineSmall, color = VastraInk)
+            Text(
+                "Find a product match or generate a clean image for " +
+                    "\"${item.subCategory.ifEmpty { item.category.label }}\". " +
+                    "The original photo is used only as a private reference.",
+                style = MaterialTheme.typography.bodySmall,
+                color = VastraMutedText
+            )
+
+            if (state is ImageSourceState.NotStarted) {
+                Button(
+                    onClick = onStart,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = VastraInk)
+                ) { Text("Find product match", color = VastraCream) }
+            } else {
+                ImageSourceSection(
+                    state = state,
+                    onConfirmWebMatch = onConfirmWebMatch,
+                    onShowNextWebCandidate = onShowNextWebCandidate,
+                    onRejectWebMatch = onRejectWebMatch,
+                    onConfirmAiRender = onConfirmAiRender,
+                    onRegenerateAiRender = onRegenerateAiRender,
+                    onTryAnotherMatch = onTryAnotherMatch
+                )
+            }
+
+            if (isSaving) {
+                LoadingRow("Saving clean image...")
+            }
+
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text("Close", color = VastraInk)
+            }
         }
     }
 }
@@ -931,7 +1020,7 @@ fun CategoryFilterRow(selectedCategory: ClothingCategory?, onCategorySelected: (
 }
 
 @Composable
-fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit) {
+fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit, onEnhance: () -> Unit = {}) {
     var showMenu by remember { mutableStateOf(false) }
 
     Card(
@@ -975,6 +1064,18 @@ fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit) {
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.padding(horizontal = 8.dp)
                             )
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = onEnhance,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, VastraBorderColor),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = VastraInk),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Outlined.AutoAwesome, null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Create clean image", style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                     Surface(
@@ -1019,6 +1120,10 @@ fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit) {
                     Icon(Icons.Filled.MoreVert, null, tint = Color.White, modifier = Modifier.size(16.dp))
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Create clean image") },
+                        onClick = { showMenu = false; onEnhance() }
+                    )
                     DropdownMenuItem(text = { Text("Delete") }, onClick = { showMenu = false; onDelete() })
                 }
             }

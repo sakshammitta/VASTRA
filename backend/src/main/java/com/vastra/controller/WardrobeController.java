@@ -179,6 +179,47 @@ public class WardrobeController {
         return ResponseEntity.ok(new ClothingItemDto.AiRenderResponse(renderUrl, renderKey, true));
     }
 
+    /**
+     * Enhance an ALREADY-SAVED wardrobe item (e.g. a PENDING item saved before
+     * API keys were configured) directly from the Wardrobe page — no rescan.
+     * Runs SerpAPI Google Lens on the item's stored crop. Candidates are not
+     * auto-confirmed; the client calls /display-image to commit a choice.
+     */
+    @PostMapping("/items/{id}/web-match")
+    public ResponseEntity<ClothingItemDto.WebMatchResponse> webMatchForItem(
+            @PathVariable UUID id,
+            @RequestBody(required = false) ClothingItemDto.EnhanceImageRequest req,
+            Authentication auth) {
+        return ResponseEntity.ok(
+            wardrobeService.webMatchForSavedItem((UUID) auth.getPrincipal(), id, req));
+    }
+
+    /**
+     * Generate an AI clean render grounded in a saved item's stored crop.
+     * Not auto-saved; the client calls /display-image to approve the render.
+     */
+    @PostMapping("/items/{id}/ai-render")
+    public ResponseEntity<ClothingItemDto.AiRenderResponse> aiRenderForItem(
+            @PathVariable UUID id,
+            @RequestBody(required = false) ClothingItemDto.EnhanceImageRequest req,
+            Authentication auth) {
+        return ResponseEntity.ok(
+            wardrobeService.aiRenderForSavedItem((UUID) auth.getPrincipal(), id, req));
+    }
+
+    /**
+     * Commit a user-confirmed clean display image (web match or approved AI
+     * render) onto a saved item. The raw crop is never set as the display image.
+     */
+    @PostMapping("/items/{id}/display-image")
+    public ResponseEntity<ClothingItemDto.ClothingItemResponse> setItemDisplayImage(
+            @PathVariable UUID id,
+            @RequestBody ClothingItemDto.SetDisplayImageRequest req,
+            Authentication auth) {
+        return ResponseEntity.ok(
+            wardrobeService.setItemDisplayImage((UUID) auth.getPrincipal(), id, req));
+    }
+
     @PostMapping("/items")
     public ResponseEntity<ClothingItemDto.ClothingItemResponse> createItem(
             @RequestBody ClothingItemDto.CreateItemRequest req,

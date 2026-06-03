@@ -90,6 +90,28 @@ interface VastraApiService {
         @Body request: EnhanceImageRequest
     ): Response<AiRenderResponse>
 
+    /** Enhance an already-saved PENDING item from the Wardrobe page (no rescan).
+     *  Runs SerpAPI Google Lens on the item's stored crop. */
+    @POST("api/wardrobe/items/{id}/web-match")
+    suspend fun webMatchForItem(
+        @Path("id") itemId: String,
+        @Body request: EnhanceImageRequest
+    ): Response<WebMatchResponse>
+
+    /** AI clean render grounded in a saved item's stored crop. */
+    @POST("api/wardrobe/items/{id}/ai-render")
+    suspend fun aiRenderForItem(
+        @Path("id") itemId: String,
+        @Body request: EnhanceImageRequest
+    ): Response<AiRenderResponse>
+
+    /** Commit a user-confirmed clean display image onto a saved item. */
+    @POST("api/wardrobe/items/{id}/display-image")
+    suspend fun setItemDisplayImage(
+        @Path("id") itemId: String,
+        @Body request: SetDisplayImageRequest
+    ): Response<ClothingItem>
+
     @GET("api/recommendations/swipe")
     suspend fun getNextSwipeCard(): Response<ClothingItem>
 
@@ -140,6 +162,11 @@ data class EnhanceImageRequest(
     val category: String? = null,
     val subCategory: String? = null,
     val brand: String? = null
+)
+data class SetDisplayImageRequest(
+    val webMatchImageUrl: String? = null,
+    val aiRenderKey: String? = null,
+    val webMatchSourceUrl: String? = null
 )
 data class SwipeRequest(val itemId: String, val direction: SwipeDirection)
 data class AddCommentRequest(val text: String)

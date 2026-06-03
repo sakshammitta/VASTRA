@@ -218,6 +218,108 @@ public class WardrobeService {
         };
     }
 
+    // ── Enhance an already-saved wardrobe item ────────────────────────────────
+    // These let a PENDING item saved before API keys were configured be enhanced
+    // later, directly from the Wardrobe page — without rescanning. They reuse the
+    // item's permanently-stored crop (r2ImageKey) as the reference/grounding
+    // input, and the item's user-confirmed attributes (overridable). All rules
+    // are unchanged: explicit user action only, no auto-confirm, no raw crop as
+    // the final display image.
+
+    /** Load an item and verify the caller owns it. */
+    private ClothingItemEntity ownedItem(UUID userId, UUID itemId) {
+        var item = itemRepo.findById(itemId).orElseThrow();
+        if (!item.getOwner().getId().equals(userId)) throw new SecurityException("Not your item");
+        return item;
+    }
+
+    private static String override(String corrected, String fallback) {
+        return (corrected != null && !corrected.isBlank()) ? corrected : fallback;
+    }
+
+    /**
+     * Run SerpAPI Google Lens on a saved item's stored crop. Returns up to 5
+     * visual-match candidates. available=false when SERPAPI_KEY is unset or the
+     * item has no crop reference. Candidates are never auto-confirmed.
+     */
+    @Transactional(readOnly = true)
+    public ClothingItemDto.WebMatchResponse webMatchForSavedItem(
+            UUID userId, UUID itemId, ClothingItemDto.EnhanceImageRequest req) {
+        var item = ownedItem(userId, itemId);
+        String cropKey = item.getR2ImageKey();
+        if (cropKey == null || cropKey.isBlank() || !imageEnhancementService.isWebMatchAvailable()) {
+            return new ClothingItemDto.WebMatchResponse(List.of(), imageEnhancementService.isWebMatchAvailable());
+        }
+        String cropUrl  = r2Service.getPresignedUrl(cropKey);
+        String category = override(req != null ? req.category() : null,
+                item.getCategory() != null ? item.getCategory().name() : "OTHER");
+        String subCat   = override(req != null ? req.subCategory() : null, item.getSubCategory());
+        String brand    = (req != null && req.brand() != null) ? req.brand() : item.getBrand();
+        var candidates  = imageEnhancementService.searchWebMatches(
+                cropUrl, category, subCat,
+                item.getColorPalette() != null ? item.getColorPalette() : List.of(), brand);
+        return new ClothingItemDto.WebMatchResponse(candidates, true);
+    }
+
+    /**
+     * Generate an AI clean render grounded in a saved item's stored crop.
+     * available=false when OPENAI_API_KEY is unset or the item has no crop.
+     * renderKey/renderUrl are null on failure. Never auto-saved — the client must
+     * call setItemDisplayImage to approve it.
+     */
+    @Transactional(readOnly = true)
+    public ClothingItemDto.AiRenderResponse aiRenderForSavedItem(
+            UUID userId, UUID itemId, ClothingItemDto.EnhanceImageRequest req) {
+        var item = ownedItem(userId, itemId);
+        String cropKey = item.getR2ImageKey();
+        if (cropKey == null || cropKey.isBlank() || !imageEnhancementService.isAiRenderAvailable()) {
+            return new ClothingItemDto.AiRenderResponse(null, null, imageEnhancementService.isAiRenderAvailable());
+        }
+        String cropUrl  = r2Service.getPresignedUrl(cropKey);
+        String category = override(req != null ? req.category() : null,
+                item.getCategory() != null ? item.getCategory().name() : "OTHER");
+        String subCat   = override(req != null ? req.subCategory() : null, item.getSubCategory());
+        String brand    = (req != null && req.brand() != null) ? req.brand() : item.getBrand();
+        String renderKey = imageEnhancementService.generateAiRender(
+                cropUrl, category, subCat,
+                item.getColorPalette() != null ? item.getColorPalette() : List.of(), brand);
+        if (renderKey == null) return new ClothingItemDto.AiRenderResponse(null, null, true);
+        return new ClothingItemDto.AiRenderResponse(r2Service.getPresignedUrl(renderKey), renderKey, true);
+    }
+
+    /**
+     * Persist a user-confirmed clean display image onto an already-saved item.
+     * Mirrors the display-image selection in confirmScanItem: a web match is
+     * downloaded + stored (source=WEB_PRODUCT), or an approved AI render key is
+     * adopted (source=AI_RENDER). The truth crop in r2ImageKey is never changed.
+     */
+    @Transactional
+    public ClothingItemDto.ClothingItemResponse setItemDisplayImage(
+            UUID userId, UUID itemId, ClothingItemDto.SetDisplayImageRequest req) {
+        var item = ownedItem(userId, itemId);
+        String webMatchImageUrl = req != null ? req.webMatchImageUrl() : null;
+        String aiRenderKey      = req != null ? req.aiRenderKey() : null;
+
+        if (webMatchImageUrl != null && !webMatchImageUrl.isBlank()) {
+            String displayKey = imageEnhancementService.downloadAndStoreWebMatchImage(webMatchImageUrl);
+            if (displayKey != null) {
+                item.setDisplayImageKey(displayKey);
+                item.setDisplayImageSource(DisplayImageSource.WEB_PRODUCT);
+                item.setWebMatchUrl(req.webMatchSourceUrl());
+            }
+        } else if (aiRenderKey != null && !aiRenderKey.isBlank()) {
+            item.setDisplayImageKey(aiRenderKey);
+            item.setDisplayImageSource(DisplayImageSource.AI_RENDER);
+        }
+
+        item = itemRepo.save(item);
+        itemRepo.flush();
+        item = itemRepo.findById(item.getId()).orElseThrow();
+        String imageUrl = r2Service.getPresignedUrl(item.getEffectiveImageKey());
+        return ClothingItemDto.ClothingItemResponse.from(item, imageUrl,
+                r2Service.getPresignedUrl(item.getR2ThumbnailKey()));
+    }
+
     @Transactional
     public void deleteItem(UUID userId, UUID itemId) {
         var item = itemRepo.findById(itemId).orElseThrow();

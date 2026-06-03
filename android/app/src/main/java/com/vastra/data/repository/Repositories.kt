@@ -168,6 +168,35 @@ class WardrobeRepository @Inject constructor(private val api: VastraApiService) 
         if (r.isSuccessful) ApiResult.Success(r.body()!!) else ApiResult.Error(r.message(), r.code())
     } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
 
+    // ── Enhance an already-saved wardrobe item (no rescan) ────────────────────
+
+    suspend fun webMatchForItem(
+        itemId: String, category: ClothingCategory? = null, subCategory: String? = null
+    ): ApiResult<com.vastra.data.model.WebMatchResponse> = try {
+        val r = api.webMatchForItem(itemId, EnhanceImageRequest(category?.name, subCategory))
+        if (r.isSuccessful) ApiResult.Success(r.body()!!) else ApiResult.Error(r.message(), r.code())
+    } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+
+    suspend fun aiRenderForItem(
+        itemId: String, category: ClothingCategory? = null, subCategory: String? = null
+    ): ApiResult<com.vastra.data.model.AiRenderResponse> = try {
+        val r = api.aiRenderForItem(itemId, EnhanceImageRequest(category?.name, subCategory))
+        if (r.isSuccessful) ApiResult.Success(r.body()!!) else ApiResult.Error(r.message(), r.code())
+    } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+
+    suspend fun setItemDisplayImage(
+        itemId: String,
+        webMatchImageUrl: String? = null,
+        webMatchSourceUrl: String? = null,
+        aiRenderKey: String? = null
+    ): ApiResult<ClothingItem> = try {
+        val r = api.setItemDisplayImage(
+            itemId,
+            SetDisplayImageRequest(webMatchImageUrl, aiRenderKey, webMatchSourceUrl)
+        )
+        if (r.isSuccessful) ApiResult.Success(r.body()!!) else ApiResult.Error(r.message(), r.code())
+    } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+
     suspend fun deleteItem(itemId: String): ApiResult<Unit> = try {
         val r = api.deleteItem(itemId)
         if (r.isSuccessful) ApiResult.Success(Unit) else ApiResult.Error(r.message(), r.code())

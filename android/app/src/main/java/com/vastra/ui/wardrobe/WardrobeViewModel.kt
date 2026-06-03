@@ -107,7 +107,14 @@ data class WardrobeUiState(
     val scanStatus: String? = null,
     val scanDebug: String? = null,
     // Set when a scan request returns HTTP 401 — prompt the user to sign in again.
-    val sessionExpired: Boolean = false
+    val sessionExpired: Boolean = false,
+    // ── Enhance-a-saved-item flow (Wardrobe page, no rescan) ──────────────────
+    // Non-null while the enhancement sheet is open for an already-saved item.
+    val enhancingItem: ClothingItem? = null,
+    // Image-source state for the item being enhanced (mirrors the scan-sheet machine).
+    val enhanceImageState: ImageSourceState = ImageSourceState.NotStarted,
+    // True while persisting the confirmed display image to the saved item.
+    val isSavingDisplayImage: Boolean = false
 )
 
 @HiltViewModel
@@ -459,6 +466,124 @@ class WardrobeViewModel @Inject constructor(
     fun tryAnotherMatch(index: Int) {
         val jobId = _uiState.value.pendingJobId ?: return
         requestWebMatch(jobId, index)
+    }
+
+    // ── Enhance an already-saved wardrobe item (no rescan) ────────────────────
+    // Lets a PENDING item saved before API keys were configured get a clean
+    // display image later. Same rules as the scan sheet: explicit action only,
+    // no auto-confirm, no raw crop as final display. Confirming a web match or
+    // approving an AI render commits immediately via setItemDisplayImage.
+
+    /** Open the enhancement sheet for a saved item. No external call yet. */
+    fun openEnhanceSheet(item: ClothingItem) {
+        _uiState.update {
+            it.copy(enhancingItem = item, enhanceImageState = ImageSourceState.NotStarted)
+        }
+    }
+
+    fun closeEnhanceSheet() {
+        _uiState.update {
+            it.copy(enhancingItem = null, enhanceImageState = ImageSourceState.NotStarted, isSavingDisplayImage = false)
+        }
+    }
+
+    private fun setEnhanceState(state: ImageSourceState) {
+        _uiState.update { it.copy(enhanceImageState = state) }
+    }
+
+    /** EXPLICIT user action — start the web-match search for the saved item. */
+    fun enhanceStartWebMatch() {
+        val item = _uiState.value.enhancingItem ?: return
+        setEnhanceState(ImageSourceState.SearchingWeb)
+        viewModelScope.launch {
+            when (val result = repo.webMatchForItem(item.id, item.category, item.subCategory.takeIf { it.isNotBlank() })) {
+                is ApiResult.Success -> {
+                    val r = result.data
+                    val newState = when {
+                        !r.available -> ImageSourceState.DisplayImagePending(
+                            "Web matching is off · set SERPAPI_KEY to enable")
+                        r.candidates.isEmpty() -> ImageSourceState.DisplayImagePending("No product match found")
+                        else -> ImageSourceState.WebCandidatesAvailable(r.candidates)
+                    }
+                    setEnhanceState(newState)
+                }
+                is ApiResult.Error ->
+                    setEnhanceState(ImageSourceState.DisplayImagePending("Web match failed"))
+            }
+        }
+    }
+
+    fun enhanceShowNextCandidate() {
+        val cur = _uiState.value.enhanceImageState
+        if (cur is ImageSourceState.WebCandidatesAvailable) {
+            setEnhanceState(cur.copy(shownIndex = (cur.shownIndex + 1) % cur.candidates.size))
+        }
+    }
+
+    /** "Yes, use this" — commit the shown web candidate to the saved item. */
+    fun enhanceConfirmWebMatch() {
+        val item = _uiState.value.enhancingItem ?: return
+        val cur = _uiState.value.enhanceImageState
+        if (cur !is ImageSourceState.WebCandidatesAvailable) return
+        val candidate = cur.current
+        commitDisplayImage(item.id, webMatchImageUrl = candidate.imageUrl, webMatchSourceUrl = candidate.sourceUrl)
+    }
+
+    /** "None of these — generate clean image" — start AI render. */
+    fun enhanceRejectWebMatch() = enhanceRequestAiRender()
+
+    /** Start (or regenerate) an AI render for the saved item. Awaits approval. */
+    fun enhanceRequestAiRender() {
+        val item = _uiState.value.enhancingItem ?: return
+        setEnhanceState(ImageSourceState.GeneratingAiRender)
+        viewModelScope.launch {
+            when (val result = repo.aiRenderForItem(item.id, item.category, item.subCategory.takeIf { it.isNotBlank() })) {
+                is ApiResult.Success -> {
+                    val r = result.data
+                    if (!r.available || r.renderUrl == null || r.renderKey == null) {
+                        val reason = if (!r.available)
+                            "Clean image unavailable · set OPENAI_API_KEY to enable"
+                        else "Couldn't generate a clean image"
+                        setEnhanceState(ImageSourceState.DisplayImagePending(reason))
+                    } else {
+                        setEnhanceState(ImageSourceState.AiRenderReadyForApproval(r.renderUrl, r.renderKey))
+                    }
+                }
+                is ApiResult.Error ->
+                    setEnhanceState(ImageSourceState.DisplayImagePending("Couldn't generate a clean image"))
+            }
+        }
+    }
+
+    /** "Use this clean image" — commit the approved AI render to the saved item. */
+    fun enhanceConfirmAiRender() {
+        val item = _uiState.value.enhancingItem ?: return
+        val cur = _uiState.value.enhanceImageState
+        if (cur !is ImageSourceState.AiRenderReadyForApproval) return
+        commitDisplayImage(item.id, aiRenderKey = cur.renderKey)
+    }
+
+    /** "Try another match" — re-run the web search for the saved item. */
+    fun enhanceTryAnotherMatch() = enhanceStartWebMatch()
+
+    /** Persist the confirmed display image, refresh the wardrobe, and close. */
+    private fun commitDisplayImage(
+        itemId: String,
+        webMatchImageUrl: String? = null,
+        webMatchSourceUrl: String? = null,
+        aiRenderKey: String? = null
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSavingDisplayImage = true) }
+            when (repo.setItemDisplayImage(itemId, webMatchImageUrl, webMatchSourceUrl, aiRenderKey)) {
+                is ApiResult.Success -> {
+                    closeEnhanceSheet()
+                    loadWardrobe()
+                }
+                is ApiResult.Error ->
+                    _uiState.update { it.copy(isSavingDisplayImage = false) }
+            }
+        }
     }
 
     fun deleteItem(itemId: String) {

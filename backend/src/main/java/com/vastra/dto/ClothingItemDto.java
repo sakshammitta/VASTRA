@@ -74,6 +74,21 @@ public class ClothingItemDto {
         String brand
     ) {}
 
+    /**
+     * Sent to POST /api/wardrobe/items/{id}/display-image to set the confirmed
+     * clean display image on an ALREADY-SAVED wardrobe item (e.g. enhancing a
+     * PENDING item later). Exactly one of the two image sources should be set:
+     *   webMatchImageUrl  : external URL of the confirmed web product thumbnail
+     *                       to download + store (with webMatchSourceUrl attribution)
+     *   aiRenderKey       : R2 key of an approved AI render (from /ai-render)
+     * Sending neither leaves the item unchanged.
+     */
+    public record SetDisplayImageRequest(
+        String webMatchImageUrl,
+        String aiRenderKey,
+        String webMatchSourceUrl
+    ) {}
+
     /** One visual match candidate returned by the web-match endpoint. */
     public record WebMatchCandidate(
         String title,
