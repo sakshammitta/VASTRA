@@ -28,13 +28,16 @@ public class WardrobeService {
     private final UserRepository userRepo;
     private final R2Service r2Service;
     private final ScanJobService scanJobService;
+    private final ImageEnhancementService imageEnhancementService;
 
     public WardrobeService(ClothingItemRepository itemRepo, UserRepository userRepo,
-                           R2Service r2Service, ScanJobService scanJobService) {
+                           R2Service r2Service, ScanJobService scanJobService,
+                           ImageEnhancementService imageEnhancementService) {
         this.itemRepo = itemRepo;
         this.userRepo = userRepo;
         this.r2Service = r2Service;
         this.scanJobService = scanJobService;
+        this.imageEnhancementService = imageEnhancementService;
     }
 
     @Transactional(readOnly = true)
@@ -145,13 +148,34 @@ public class WardrobeService {
         }
         item.setAiModelSource(AI_MODEL_SOURCE);
 
+        // ── Display image selection ───────────────────────────────────────────
+        // The caller may have gone through the web-match or AI-render flow;
+        // store their chosen clean display image so the wardrobe never shows
+        // the raw messy crop. The truth crop stays in r2ImageKey unchanged.
+        String webMatchImageUrl = req.webMatchImageUrl();
+        String aiRenderKey      = req.aiRenderKey();
+        if (webMatchImageUrl != null && !webMatchImageUrl.isBlank()) {
+            // Download the confirmed web product thumbnail and store it in R2
+            // so the display image is under VASTRA's control and won't expire.
+            String displayKey = imageEnhancementService.downloadAndStoreWebMatchImage(webMatchImageUrl);
+            if (displayKey != null) {
+                item.setDisplayImageKey(displayKey);
+                item.setDisplayImageSource(DisplayImageSource.WEB_PRODUCT);
+                item.setWebMatchUrl(req.webMatchSourceUrl());
+            }
+        } else if (aiRenderKey != null && !aiRenderKey.isBlank()) {
+            item.setDisplayImageKey(aiRenderKey);
+            item.setDisplayImageSource(DisplayImageSource.AI_RENDER);
+        }
+
         item = itemRepo.save(item);
         itemRepo.flush();
         item = itemRepo.findById(item.getId()).orElseThrow();
         user.setItemCount(user.getItemCount() + 1);
         userRepo.save(user);
 
-        String imageUrl = r2Service.getPresignedUrl(cropKey);
+        // Use the effective display image (web match or AI render if set, else crop)
+        String imageUrl = r2Service.getPresignedUrl(item.getEffectiveImageKey());
         return ClothingItemDto.ClothingItemResponse.from(item, imageUrl, null);
     }
 

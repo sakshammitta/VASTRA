@@ -43,6 +43,11 @@ public class ClothingItemDto {
      * Sent to POST /api/wardrobe/scan/{jobId}/confirm to save one detected item.
      * itemIndex selects which entry in detectedItems to persist.
      * All other fields are optional overrides; omitting category uses the CV-detected label.
+     *
+     * Display image selection (both optional — omit to keep CROP default):
+     *   webMatchImageUrl  : external URL of the confirmed web product thumbnail to download + store
+     *   aiRenderKey       : R2 key of a pre-generated AI render (from /ai-render endpoint)
+     *   webMatchSourceUrl : attribution web page URL stored alongside the download
      */
     public record ConfirmScanItemRequest(
         int itemIndex,
@@ -51,6 +56,37 @@ public class ClothingItemDto {
         String subCategory,
         List<String> tags,
         String brand,
-        BigDecimal priceUsd
+        BigDecimal priceUsd,
+        String webMatchImageUrl,
+        String aiRenderKey,
+        String webMatchSourceUrl
+    ) {}
+
+    /** One visual match candidate returned by the web-match endpoint. */
+    public record WebMatchCandidate(
+        String title,
+        String imageUrl,
+        String sourceUrl,
+        String siteName
+    ) {}
+
+    /**
+     * Response from POST /scan/{jobId}/items/{idx}/web-match.
+     * available=false means SerpAPI is not configured in this environment.
+     */
+    public record WebMatchResponse(
+        List<WebMatchCandidate> candidates,
+        boolean available
+    ) {}
+
+    /**
+     * Response from POST /scan/{jobId}/items/{idx}/ai-render.
+     * available=false means OpenAI is not configured in this environment.
+     * renderUrl/renderKey are null on failure even when available=true.
+     */
+    public record AiRenderResponse(
+        String renderUrl,
+        String renderKey,
+        boolean available
     ) {}
 }

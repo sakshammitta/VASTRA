@@ -1,6 +1,7 @@
 package com.vastra.controller;
 
 import com.vastra.dto.ClothingItemDto;
+import com.vastra.service.ImageEnhancementService;
 import com.vastra.service.R2Service;
 import com.vastra.service.ScanJobService;
 import com.vastra.service.WardrobeService;
@@ -26,11 +27,14 @@ public class WardrobeController {
     private final WardrobeService wardrobeService;
     private final ScanJobService scanJobService;
     private final R2Service r2Service;
+    private final ImageEnhancementService imageEnhancementService;
 
-    public WardrobeController(WardrobeService wardrobeService, ScanJobService scanJobService, R2Service r2Service) {
+    public WardrobeController(WardrobeService wardrobeService, ScanJobService scanJobService,
+                               R2Service r2Service, ImageEnhancementService imageEnhancementService) {
         this.wardrobeService = wardrobeService;
         this.scanJobService = scanJobService;
         this.r2Service = r2Service;
+        this.imageEnhancementService = imageEnhancementService;
     }
 
     @GetMapping
@@ -80,6 +84,82 @@ public class WardrobeController {
             @RequestBody ClothingItemDto.ConfirmScanItemRequest req,
             Authentication auth) {
         return ResponseEntity.ok(wardrobeService.confirmScanItem((UUID) auth.getPrincipal(), jobId, req));
+    }
+
+    /**
+     * POST /api/wardrobe/scan/{jobId}/items/{itemIndex}/web-match
+     *
+     * Runs SerpAPI Google Lens reverse-image search on the detected item's crop.
+     * Returns up to 5 visual-match candidates for display in the review flow.
+     * Returns available=false when SERPAPI_KEY is not configured.
+     */
+    @SuppressWarnings("unchecked")
+    @PostMapping("/scan/{jobId}/items/{itemIndex}/web-match")
+    public ResponseEntity<ClothingItemDto.WebMatchResponse> requestWebMatch(
+            @PathVariable String jobId,
+            @PathVariable int itemIndex) {
+
+        if (!imageEnhancementService.isWebMatchAvailable()) {
+            return ResponseEntity.ok(new ClothingItemDto.WebMatchResponse(List.of(), false));
+        }
+
+        Map<String, Object> job = scanJobService.getJobStatus(jobId);
+        if (job == null) return ResponseEntity.notFound().build();
+
+        List<Map<String, Object>> items =
+            (List<Map<String, Object>>) job.getOrDefault("detectedItems", List.of());
+        if (itemIndex < 0 || itemIndex >= items.size()) return ResponseEntity.badRequest().build();
+
+        Map<String, Object> detected = items.get(itemIndex);
+        String cropKey    = (String) detected.get("crop_key");
+        String cropUrl    = r2Service.getPresignedUrl(cropKey);
+        String category   = (String) detected.getOrDefault("category", "OTHER");
+        String subCat     = (String) detected.getOrDefault("sub_category", "");
+        List<String> colors = (List<String>) detected.getOrDefault("color_palette", List.of());
+
+        List<ClothingItemDto.WebMatchCandidate> candidates =
+            imageEnhancementService.searchWebMatches(cropUrl, category, subCat, colors, null);
+
+        return ResponseEntity.ok(new ClothingItemDto.WebMatchResponse(candidates, true));
+    }
+
+    /**
+     * POST /api/wardrobe/scan/{jobId}/items/{itemIndex}/ai-render
+     *
+     * Generates a clean fashion e-commerce product image using gpt-image-1.
+     * Uploads the result to R2 and returns the presigned URL + R2 key.
+     * Returns available=false when OPENAI_API_KEY is not configured.
+     * renderUrl/renderKey are null on generation failure.
+     */
+    @SuppressWarnings("unchecked")
+    @PostMapping("/scan/{jobId}/items/{itemIndex}/ai-render")
+    public ResponseEntity<ClothingItemDto.AiRenderResponse> requestAiRender(
+            @PathVariable String jobId,
+            @PathVariable int itemIndex) {
+
+        if (!imageEnhancementService.isAiRenderAvailable()) {
+            return ResponseEntity.ok(new ClothingItemDto.AiRenderResponse(null, null, false));
+        }
+
+        Map<String, Object> job = scanJobService.getJobStatus(jobId);
+        if (job == null) return ResponseEntity.notFound().build();
+
+        List<Map<String, Object>> items =
+            (List<Map<String, Object>>) job.getOrDefault("detectedItems", List.of());
+        if (itemIndex < 0 || itemIndex >= items.size()) return ResponseEntity.badRequest().build();
+
+        Map<String, Object> detected = items.get(itemIndex);
+        String category   = (String) detected.getOrDefault("category", "OTHER");
+        String subCat     = (String) detected.getOrDefault("sub_category", "");
+        List<String> colors = (List<String>) detected.getOrDefault("color_palette", List.of());
+
+        String renderKey = imageEnhancementService.generateAiRender(category, subCat, colors, null);
+        if (renderKey == null) {
+            return ResponseEntity.ok(new ClothingItemDto.AiRenderResponse(null, null, true));
+        }
+
+        String renderUrl = r2Service.getPresignedUrl(renderKey);
+        return ResponseEntity.ok(new ClothingItemDto.AiRenderResponse(renderUrl, renderKey, true));
     }
 
     @PostMapping("/items")

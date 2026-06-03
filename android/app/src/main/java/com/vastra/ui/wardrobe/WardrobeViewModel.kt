@@ -8,6 +8,7 @@ import com.vastra.data.model.DetectedScanItem
 import com.vastra.data.model.OwnershipStatus
 import com.vastra.data.model.ScanJob
 import com.vastra.data.model.ScanStatus
+import com.vastra.data.model.WebMatchCandidate
 import com.vastra.data.repository.ApiResult
 import com.vastra.data.repository.WardrobeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -19,6 +20,26 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
+
+/** Tracks the image-source selection state for a single item in the review sheet. */
+sealed class ImageSourceState {
+    /** Initial state — search not yet started. */
+    object Idle : ImageSourceState()
+    /** SerpAPI Google Lens search in progress. */
+    object SearchingWeb : ImageSourceState()
+    /** One or more visual-match candidates returned; user must confirm or reject. */
+    data class WebCandidates(val candidates: List<WebMatchCandidate>) : ImageSourceState()
+    /** Web search returned no usable candidates. */
+    object NoWebMatch : ImageSourceState()
+    /** User confirmed a web match candidate. */
+    data class WebConfirmed(val candidate: WebMatchCandidate) : ImageSourceState()
+    /** gpt-image-1 render in progress. */
+    object Rendering : ImageSourceState()
+    /** Render complete; renderUrl is the presigned URL for preview, renderKey is the R2 key. */
+    data class AiRendered(val renderUrl: String, val renderKey: String) : ImageSourceState()
+    /** Render failed or OpenAI not configured. */
+    object AiRenderUnavailable : ImageSourceState()
+}
 
 data class WardrobeUiState(
     val items: List<ClothingItem> = emptyList(),
@@ -37,6 +58,8 @@ data class WardrobeUiState(
     val editedCategories: Map<Int, ClothingCategory> = emptyMap(),
     val editedSubcategories: Map<Int, String> = emptyMap(),
     val isConfirming: Boolean = false,
+    // Per-item image-source state (keyed by detected-item index)
+    val imageSourceStates: Map<Int, ImageSourceState> = emptyMap(),
     // Temporary on-screen scan-flow trace (visible debug panel on the Scan screen).
     val scanStatus: String? = null,
     val scanDebug: String? = null,
@@ -167,10 +190,13 @@ class WardrobeViewModel @Inject constructor(
                                         selectedDetectedIndices = allIndices,
                                         editedCategories = seedCats,
                                         editedSubcategories = seedSubs,
+                                        imageSourceStates = emptyMap(),
                                         scanStatus = "Detected ${job.detectedItems.size} item(s)",
                                         scanDebug = job.detectedItems.joinToString { "${it.category}/${it.subCategory}" }
                                     )
                                 }
+                                // Auto-start web match search for every detected item
+                                job.detectedItems.indices.forEach { i -> requestWebMatch(jobId, i) }
                                 return@launch
                             }
                             ScanStatus.FAILED -> {
@@ -224,13 +250,17 @@ class WardrobeViewModel @Inject constructor(
             _uiState.update { it.copy(isConfirming = true) }
             val edits = _uiState.value
             for (index in indices) {
-                // Send the user-edited category/subcategory so a wrong CV guess
-                // (e.g. jacket) is saved as the user's correction (e.g. t-shirt).
+                val imgState = edits.imageSourceStates[index]
+                val webCandidate = (imgState as? ImageSourceState.WebConfirmed)?.candidate
+                val aiRenderKey  = (imgState as? ImageSourceState.AiRendered)?.renderKey
                 repo.confirmScanItem(
                     jobId = jobId,
                     itemIndex = index,
                     category = edits.editedCategories[index],
-                    subCategory = edits.editedSubcategories[index]?.takeIf { it.isNotBlank() }
+                    subCategory = edits.editedSubcategories[index]?.takeIf { it.isNotBlank() },
+                    webMatchImageUrl = webCandidate?.imageUrl,
+                    webMatchSourceUrl = webCandidate?.sourceUrl,
+                    aiRenderKey = aiRenderKey
                 )
             }
             _uiState.update {
@@ -240,7 +270,8 @@ class WardrobeViewModel @Inject constructor(
                     pendingJobId = null,
                     selectedDetectedIndices = emptySet(),
                     editedCategories = emptyMap(),
-                    editedSubcategories = emptyMap()
+                    editedSubcategories = emptyMap(),
+                    imageSourceStates = emptyMap()
                 )
             }
             loadWardrobe()
@@ -253,8 +284,66 @@ class WardrobeViewModel @Inject constructor(
             pendingJobId = null,
             selectedDetectedIndices = emptySet(),
             editedCategories = emptyMap(),
-            editedSubcategories = emptyMap()
+            editedSubcategories = emptyMap(),
+            imageSourceStates = emptyMap()
         )
+    }
+
+    // ── Image source methods ─────────────────────────────────────────────────
+
+    fun requestWebMatch(jobId: String, index: Int) {
+        _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to ImageSourceState.SearchingWeb)) }
+        viewModelScope.launch {
+            when (val result = repo.requestWebMatch(jobId, index)) {
+                is ApiResult.Success -> {
+                    val r = result.data
+                    val newState = when {
+                        !r.available          -> ImageSourceState.AiRenderUnavailable
+                        r.candidates.isEmpty() -> ImageSourceState.NoWebMatch
+                        else                   -> ImageSourceState.WebCandidates(r.candidates)
+                    }
+                    _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to newState)) }
+                    // If no web match found, automatically start AI render
+                    if (newState is ImageSourceState.NoWebMatch) {
+                        requestAiRender(index)
+                    }
+                }
+                is ApiResult.Error -> {
+                    _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to ImageSourceState.NoWebMatch)) }
+                    requestAiRender(index)
+                }
+            }
+        }
+    }
+
+    fun confirmWebMatch(index: Int, candidate: WebMatchCandidate) {
+        _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to ImageSourceState.WebConfirmed(candidate))) }
+    }
+
+    fun rejectWebMatch(index: Int) {
+        requestAiRender(index)
+    }
+
+    fun requestAiRender(index: Int) {
+        val jobId = _uiState.value.pendingJobId ?: return
+        _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to ImageSourceState.Rendering)) }
+        viewModelScope.launch {
+            when (val result = repo.requestAiRender(jobId, index)) {
+                is ApiResult.Success -> {
+                    val r = result.data
+                    val newState = when {
+                        !r.available || r.renderUrl == null || r.renderKey == null ->
+                            ImageSourceState.AiRenderUnavailable
+                        else ->
+                            ImageSourceState.AiRendered(r.renderUrl, r.renderKey)
+                    }
+                    _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to newState)) }
+                }
+                is ApiResult.Error -> {
+                    _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to ImageSourceState.AiRenderUnavailable)) }
+                }
+            }
+        }
     }
 
     fun deleteItem(itemId: String) {

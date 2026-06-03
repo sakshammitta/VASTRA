@@ -73,6 +73,12 @@ vastra:
   cv-service:
     base-url: ${CV_SERVICE_URL:http://localhost:8001}
 
+  serpapi:
+    api-key: ${SERPAPI_KEY:}
+
+  openai:
+    api-key: ${OPENAI_API_KEY:}
+
 logging:
   level:
     com.vastra: INFO

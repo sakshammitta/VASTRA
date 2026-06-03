@@ -42,6 +42,18 @@ public class R2Service {
         return key;
     }
 
+    public String uploadBytes(byte[] data, String folder, String contentType) {
+        if (r2Client == null) {
+            return "https://placeholder.vastra.app/" + folder + "/" + UUID.randomUUID() + ".jpg";
+        }
+        String key = folder + "/" + UUID.randomUUID() + ".jpg";
+        r2Client.putObject(
+            PutObjectRequest.builder().bucket(bucket).key(key).contentType(contentType).build(),
+            RequestBody.fromBytes(data)
+        );
+        return key;
+    }
+
     public String getPresignedUrl(String key) {
         if (key == null) return null;
         if (r2Presigner == null) return "https://placeholder.vastra.app/" + key;

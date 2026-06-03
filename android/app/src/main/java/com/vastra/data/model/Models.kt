@@ -49,7 +49,9 @@ data class ClothingItem(
     val purchaseUrl: String? = null,
     val priceUsd: Float? = null,
     val styleMatchPercent: Int = 0,
-    val addedAt: String = ""
+    val addedAt: String = "",
+    // CROP | WEB_PRODUCT | AI_RENDER — lets the wardrobe badge clean display images
+    val displayImageSource: String = "CROP"
 )
 
 enum class OwnershipStatus { OWNED, ASPIRATIONAL }
@@ -110,6 +112,27 @@ data class ScanJob(
 )
 
 enum class ScanStatus { QUEUED, PROCESSING, COMPLETE, FAILED }
+
+/** One visual product-match candidate from SerpAPI Google Lens. */
+data class WebMatchCandidate(
+    val title: String,
+    val imageUrl: String,
+    val sourceUrl: String,
+    val siteName: String?
+)
+
+/** Response from POST /scan/{jobId}/items/{idx}/web-match. */
+data class WebMatchResponse(
+    val candidates: List<WebMatchCandidate>,
+    val available: Boolean
+)
+
+/** Response from POST /scan/{jobId}/items/{idx}/ai-render. */
+data class AiRenderResponse(
+    val renderUrl: String?,
+    val renderKey: String?,
+    val available: Boolean
+)
 
 data class Comment(
     val id: String,

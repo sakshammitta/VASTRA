@@ -2,6 +2,7 @@ package com.vastra.ui.wardrobe
 
 import android.content.Context
 import android.net.Uri
+import com.vastra.data.model.WebMatchCandidate
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -220,10 +221,14 @@ fun WardrobeScreen(
                 selectedIndices = uiState.selectedDetectedIndices,
                 editedCategories = uiState.editedCategories,
                 editedSubcategories = uiState.editedSubcategories,
+                imageSourceStates = uiState.imageSourceStates,
                 isConfirming = uiState.isConfirming,
                 onToggle = { viewModel.toggleDetectedItem(it) },
                 onCategoryChange = { i, c -> viewModel.setItemCategory(i, c) },
                 onSubcategoryChange = { i, s -> viewModel.setItemSubcategory(i, s) },
+                onConfirmWebMatch = { i, c -> viewModel.confirmWebMatch(i, c) },
+                onRejectWebMatch = { viewModel.rejectWebMatch(it) },
+                onRetryAiRender = { viewModel.requestAiRender(it) },
                 onConfirm = { viewModel.confirmSelectedItems() },
                 onDismiss = { viewModel.dismissScanResult() }
             )
@@ -270,10 +275,14 @@ fun ScanResultSelectionSheet(
     selectedIndices: Set<Int>,
     editedCategories: Map<Int, ClothingCategory>,
     editedSubcategories: Map<Int, String>,
+    imageSourceStates: Map<Int, ImageSourceState>,
     isConfirming: Boolean,
     onToggle: (Int) -> Unit,
     onCategoryChange: (Int, ClothingCategory) -> Unit,
     onSubcategoryChange: (Int, String) -> Unit,
+    onConfirmWebMatch: (Int, WebMatchCandidate) -> Unit,
+    onRejectWebMatch: (Int) -> Unit,
+    onRetryAiRender: (Int) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -321,10 +330,14 @@ fun ScanResultSelectionSheet(
                         isSelected = index in selectedIndices,
                         category = editedCategories[index] ?: item.category,
                         subCategory = editedSubcategories[index] ?: item.subCategory,
-                        onToggle = { onToggle(index) },
                         aiSuggestion = item.subCategory,
+                        imageSourceState = imageSourceStates[index] ?: ImageSourceState.Idle,
+                        onToggle = { onToggle(index) },
                         onCategoryChange = { onCategoryChange(index, it) },
-                        onSubcategoryChange = { onSubcategoryChange(index, it) }
+                        onSubcategoryChange = { onSubcategoryChange(index, it) },
+                        onConfirmWebMatch = { onConfirmWebMatch(index, it) },
+                        onRejectWebMatch = { onRejectWebMatch(index) },
+                        onRetryAiRender = { onRetryAiRender(index) }
                     )
                     if (index < detectedItems.lastIndex) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = VastraBorderColor)
@@ -368,9 +381,13 @@ fun DetectedItemRow(
     category: ClothingCategory,
     subCategory: String,
     aiSuggestion: String,
+    imageSourceState: ImageSourceState,
     onToggle: () -> Unit,
     onCategoryChange: (ClothingCategory) -> Unit,
-    onSubcategoryChange: (String) -> Unit
+    onSubcategoryChange: (String) -> Unit,
+    onConfirmWebMatch: (WebMatchCandidate) -> Unit,
+    onRejectWebMatch: () -> Unit,
+    onRetryAiRender: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Row(
@@ -449,6 +466,159 @@ fun DetectedItemRow(
                 onValueChange = onSubcategoryChange,
                 modifier = Modifier.weight(1f)
             )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        ImageSourceSection(
+            state = imageSourceState,
+            onConfirmWebMatch = onConfirmWebMatch,
+            onRejectWebMatch = onRejectWebMatch,
+            onRetryAiRender = onRetryAiRender
+        )
+    }
+}
+
+/**
+ * Shows the clean-image sourcing flow for one detected garment.
+ *
+ * State machine:
+ *  Idle / SearchingWeb → [WebCandidates] → user taps Yes → WebConfirmed
+ *                                         → user taps No → Rendering → AiRendered
+ *              NoWebMatch → auto-advances to Rendering → AiRendered
+ *              AiRenderUnavailable → shows a note (item will save with CROP fallback)
+ *
+ * Neither service being configured is a valid state; the section shows a note
+ * and the item saves with CROP. The crop is never shown here as "the image"
+ * since it's the reference used for search/render, not the final display.
+ */
+@Composable
+private fun ImageSourceSection(
+    state: ImageSourceState,
+    onConfirmWebMatch: (WebMatchCandidate) -> Unit,
+    onRejectWebMatch: () -> Unit,
+    onRetryAiRender: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = VastraMuted,
+        border = BorderStroke(1.dp, VastraBorderColor)
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Wardrobe image",
+                style = MaterialTheme.typography.labelSmall,
+                color = VastraMutedText
+            )
+
+            when (state) {
+                is ImageSourceState.Idle, is ImageSourceState.SearchingWeb -> {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = VastraMutedText)
+                        Text("Finding product match...", style = MaterialTheme.typography.bodySmall, color = VastraMutedText)
+                    }
+                }
+
+                is ImageSourceState.WebCandidates -> {
+                    val top = state.candidates.first()
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AsyncImage(
+                            model = top.imageUrl,
+                            contentDescription = top.title,
+                            modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(VastraCard),
+                            contentScale = ContentScale.Crop
+                        )
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                top.title.take(48),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = VastraInk,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (!top.siteName.isNullOrBlank()) {
+                                Text(top.siteName, style = MaterialTheme.typography.labelSmall, color = VastraMutedText)
+                            }
+                            Text("Is this your item?", style = MaterialTheme.typography.labelSmall, color = VastraMutedText)
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { onConfirmWebMatch(top) },
+                            modifier = Modifier.weight(1f).height(36.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = VastraInk)
+                        ) { Text("Yes, use this", style = MaterialTheme.typography.labelSmall, color = VastraCream) }
+                        OutlinedButton(
+                            onClick = onRejectWebMatch,
+                            modifier = Modifier.weight(1f).height(36.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, VastraBorderColor)
+                        ) { Text("No match", style = MaterialTheme.typography.labelSmall, color = VastraInk) }
+                    }
+                }
+
+                is ImageSourceState.NoWebMatch, is ImageSourceState.Rendering -> {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = VastraMutedText)
+                        Text("Generating clean image...", style = MaterialTheme.typography.bodySmall, color = VastraMutedText)
+                    }
+                }
+
+                is ImageSourceState.WebConfirmed -> {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AsyncImage(
+                            model = state.candidate.imageUrl,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(VastraCard),
+                            contentScale = ContentScale.Crop
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Filled.CheckCircle, null, modifier = Modifier.size(14.dp), tint = VastraInk)
+                                Text("Product image confirmed", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = VastraInk)
+                            }
+                            if (!state.candidate.siteName.isNullOrBlank()) {
+                                Text(state.candidate.siteName, style = MaterialTheme.typography.labelSmall, color = VastraMutedText)
+                            }
+                        }
+                    }
+                }
+
+                is ImageSourceState.AiRendered -> {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AsyncImage(
+                            model = state.renderUrl,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(VastraCard),
+                            contentScale = ContentScale.Crop
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Filled.CheckCircle, null, modifier = Modifier.size(14.dp), tint = VastraInk)
+                                Text("Clean image ready", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = VastraInk)
+                            }
+                            Text("AI-generated product photo", style = MaterialTheme.typography.labelSmall, color = VastraMutedText)
+                        }
+                    }
+                }
+
+                is ImageSourceState.AiRenderUnavailable -> {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Filled.Info, null, modifier = Modifier.size(14.dp), tint = VastraMutedText)
+                        Text(
+                            "Clean image unavailable · set SERPAPI_KEY and OPENAI_API_KEY to enable",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = VastraMutedText
+                        )
+                        TextButton(
+                            onClick = onRetryAiRender,
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                        ) { Text("Retry", style = MaterialTheme.typography.labelSmall) }
+                    }
+                }
+            }
         }
     }
 }

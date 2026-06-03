@@ -1,6 +1,8 @@
 package com.vastra.data.remote
 
 import com.vastra.data.model.*
+import com.vastra.data.model.AiRenderResponse
+import com.vastra.data.model.WebMatchResponse
 import okhttp3.MultipartBody
 import retrofit2.Response
 import retrofit2.http.*
@@ -70,6 +72,20 @@ interface VastraApiService {
         @Body request: ConfirmScanItemRequest
     ): Response<ClothingItem>
 
+    /** Runs SerpAPI Google Lens on the detected crop; returns visual-match candidates. */
+    @POST("api/wardrobe/scan/{jobId}/items/{itemIndex}/web-match")
+    suspend fun requestWebMatch(
+        @Path("jobId") jobId: String,
+        @Path("itemIndex") itemIndex: Int
+    ): Response<WebMatchResponse>
+
+    /** Calls gpt-image-1 to generate a clean product image; uploads to R2. */
+    @POST("api/wardrobe/scan/{jobId}/items/{itemIndex}/ai-render")
+    suspend fun requestAiRender(
+        @Path("jobId") jobId: String,
+        @Path("itemIndex") itemIndex: Int
+    ): Response<AiRenderResponse>
+
     @GET("api/recommendations/swipe")
     suspend fun getNextSwipeCard(): Response<ClothingItem>
 
@@ -110,7 +126,11 @@ data class ConfirmScanItemRequest(
     val subCategory: String? = null,
     val brand: String? = null,
     val tags: List<String>? = null,
-    val priceUsd: Float? = null
+    val priceUsd: Float? = null,
+    // Display image selection — both optional; omit to default to CROP
+    val webMatchImageUrl: String? = null,
+    val aiRenderKey: String? = null,
+    val webMatchSourceUrl: String? = null
 )
 data class SwipeRequest(val itemId: String, val direction: SwipeDirection)
 data class AddCommentRequest(val text: String)

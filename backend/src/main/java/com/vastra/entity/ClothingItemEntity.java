@@ -90,6 +90,13 @@ public class ClothingItemEntity {
     @Column(name = "hex_color")
     private List<String> colorPalette = new ArrayList<>();
 
+    // ── Web-match attribution (set only when displayImageSource = WEB_PRODUCT) ─
+    @Column(name = "web_match_url", length = 2048)
+    private String webMatchUrl;
+
+    @Column(name = "web_match_query", length = 512)
+    private String webMatchQuery;
+
     @CreationTimestamp
     private Instant addedAt;
 
@@ -324,4 +331,10 @@ public class ClothingItemEntity {
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
     }
+
+    public String getWebMatchUrl() { return webMatchUrl; }
+    public void setWebMatchUrl(String webMatchUrl) { this.webMatchUrl = webMatchUrl; }
+
+    public String getWebMatchQuery() { return webMatchQuery; }
+    public void setWebMatchQuery(String webMatchQuery) { this.webMatchQuery = webMatchQuery; }
 }

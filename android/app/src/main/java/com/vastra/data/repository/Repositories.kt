@@ -133,16 +133,32 @@ class WardrobeRepository @Inject constructor(private val api: VastraApiService) 
         jobId: String,
         itemIndex: Int,
         category: ClothingCategory? = null,
-        subCategory: String? = null
+        subCategory: String? = null,
+        webMatchImageUrl: String? = null,
+        webMatchSourceUrl: String? = null,
+        aiRenderKey: String? = null
     ): ApiResult<ClothingItem> = try {
         val r = api.confirmScanItem(
             jobId,
             ConfirmScanItemRequest(
                 itemIndex = itemIndex,
                 category = category?.name,
-                subCategory = subCategory
+                subCategory = subCategory,
+                webMatchImageUrl = webMatchImageUrl,
+                webMatchSourceUrl = webMatchSourceUrl,
+                aiRenderKey = aiRenderKey
             )
         )
+        if (r.isSuccessful) ApiResult.Success(r.body()!!) else ApiResult.Error(r.message(), r.code())
+    } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+
+    suspend fun requestWebMatch(jobId: String, itemIndex: Int): ApiResult<com.vastra.data.model.WebMatchResponse> = try {
+        val r = api.requestWebMatch(jobId, itemIndex)
+        if (r.isSuccessful) ApiResult.Success(r.body()!!) else ApiResult.Error(r.message(), r.code())
+    } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+
+    suspend fun requestAiRender(jobId: String, itemIndex: Int): ApiResult<com.vastra.data.model.AiRenderResponse> = try {
+        val r = api.requestAiRender(jobId, itemIndex)
         if (r.isSuccessful) ApiResult.Success(r.body()!!) else ApiResult.Error(r.message(), r.code())
     } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
 
