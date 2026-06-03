@@ -322,6 +322,7 @@ fun ScanResultSelectionSheet(
                         category = editedCategories[index] ?: item.category,
                         subCategory = editedSubcategories[index] ?: item.subCategory,
                         onToggle = { onToggle(index) },
+                        aiSuggestion = item.subCategory,
                         onCategoryChange = { onCategoryChange(index, it) },
                         onSubcategoryChange = { onSubcategoryChange(index, it) }
                     )
@@ -366,6 +367,7 @@ fun DetectedItemRow(
     isSelected: Boolean,
     category: ClothingCategory,
     subCategory: String,
+    aiSuggestion: String,
     onToggle: () -> Unit,
     onCategoryChange: (ClothingCategory) -> Unit,
     onSubcategoryChange: (String) -> Unit
@@ -443,6 +445,7 @@ fun DetectedItemRow(
             SubtypeField(
                 category = category,
                 value = subCategory,
+                aiSuggestion = aiSuggestion,
                 onValueChange = onSubcategoryChange,
                 modifier = Modifier.weight(1f)
             )
@@ -490,66 +493,136 @@ private fun CategoryDropdown(
     }
 }
 
+private const val CUSTOM_TYPE_LABEL = "Other / Custom"
+
 /**
- * Editable Type field with normalized subtype suggestions for the current
- * category. The field stays free-text — suggestions are a convenience, and the
- * user can always type a custom value. Whatever is here at confirm time is what
- * gets saved.
+ * Type picker for the current category.
+ *
+ * Default mode is a plain single-tap menu that always lists every normalized
+ * subtype for the category plus "Other / Custom" — the menu is NEVER filtered
+ * by the current value, so changing trousers → joggers is one tap with no
+ * backspacing. (The old version used `value` as a live search filter, which is
+ * why erasing the AI text was needed and why backspace appeared to stick: each
+ * keystroke re-filtered and re-narrowed the list, and recomposition kept
+ * reapplying the field value.)
+ *
+ * Picking "Other / Custom" switches to a free-text field for anything outside
+ * the vocabulary. Whatever value is set here at confirm time is what gets saved
+ * as the canonical type.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SubtypeField(
     category: ClothingCategory,
     value: String,
+    aiSuggestion: String,
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var expanded by remember { mutableStateOf(false) }
     val allSuggestions = remember(category) { SubtypeVocabulary.suggestionsFor(category) }
-    // Filter suggestions by what the user has typed so far (case-insensitive).
-    val filtered = remember(value, allSuggestions) {
-        if (value.isBlank()) allSuggestions
-        else allSuggestions.filter { it.contains(value.trim(), ignoreCase = true) }
+    val matched = allSuggestions.firstOrNull { it.equals(value.trim(), ignoreCase = true) }
+    // Custom mode when there is no vocabulary for this category, or the current
+    // value is a non-empty value that isn't one of the menu options.
+    val valueIsCustom = value.isNotBlank() && matched == null
+    var customMode by remember(category) {
+        mutableStateOf(allSuggestions.isEmpty() || valueIsCustom)
     }
 
-    ExposedDropdownMenuBox(
-        expanded = expanded && filtered.isNotEmpty(),
-        onExpandedChange = { expanded = it },
-        modifier = modifier
-    ) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = {
-                onValueChange(it)
-                expanded = true
-            },
-            singleLine = true,
-            label = { Text("Type", style = MaterialTheme.typography.labelSmall) },
-            placeholder = { Text("e.g. joggers") },
-            textStyle = MaterialTheme.typography.bodySmall,
-            trailingIcon = {
-                if (allSuggestions.isNotEmpty()) {
-                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-                }
-            },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = VastraInk,
-                unfocusedBorderColor = VastraBorderColor
-            ),
-            modifier = Modifier.menuAnchor().fillMaxWidth()
-        )
-        if (filtered.isNotEmpty()) {
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                filtered.forEach { suggestion ->
+    Column(modifier = modifier) {
+        if (customMode && allSuggestions.isNotEmpty()) {
+            // Free-text entry with a way back to the quick-pick list.
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                label = { Text("Type (custom)", style = MaterialTheme.typography.labelSmall) },
+                placeholder = { Text("e.g. culottes") },
+                textStyle = MaterialTheme.typography.bodySmall,
+                trailingIcon = {
+                    IconButton(onClick = {
+                        onValueChange("")
+                        customMode = false
+                    }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Back to list", tint = VastraBorderColor)
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = VastraInk,
+                    unfocusedBorderColor = VastraBorderColor
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else if (allSuggestions.isNotEmpty()) {
+            var expanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = it }
+            ) {
+                OutlinedTextField(
+                    value = matched ?: "",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Type", style = MaterialTheme.typography.labelSmall) },
+                    placeholder = { Text("Select type") },
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = VastraInk,
+                        unfocusedBorderColor = VastraBorderColor
+                    ),
+                    modifier = Modifier.menuAnchor().fillMaxWidth()
+                )
+                ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    allSuggestions.forEach { suggestion ->
+                        DropdownMenuItem(
+                            text = { Text(suggestion, style = MaterialTheme.typography.bodySmall) },
+                            onClick = {
+                                onValueChange(suggestion)
+                                expanded = false
+                            }
+                        )
+                    }
                     DropdownMenuItem(
-                        text = { Text(suggestion, style = MaterialTheme.typography.bodySmall) },
+                        text = {
+                            Text(
+                                CUSTOM_TYPE_LABEL,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = VastraMutedText
+                            )
+                        },
                         onClick = {
-                            onValueChange(suggestion)
+                            onValueChange("")
+                            customMode = true
                             expanded = false
                         }
                     )
                 }
             }
+        } else {
+            // No vocabulary for this category — plain free-text.
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                label = { Text("Type", style = MaterialTheme.typography.labelSmall) },
+                textStyle = MaterialTheme.typography.bodySmall,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = VastraInk,
+                    unfocusedBorderColor = VastraBorderColor
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        // Show the original AI guess once the user has changed it, so it's clear
+        // the correction was applied (and what the model originally predicted).
+        if (aiSuggestion.isNotBlank() && !aiSuggestion.equals(value.trim(), ignoreCase = true)) {
+            Text(
+                "AI suggested: $aiSuggestion",
+                style = MaterialTheme.typography.labelSmall,
+                color = VastraMutedText,
+                modifier = Modifier.padding(top = 2.dp, start = 4.dp)
+            )
         }
     }
 }
