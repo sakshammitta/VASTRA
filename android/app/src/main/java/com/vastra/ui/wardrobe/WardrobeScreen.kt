@@ -247,7 +247,8 @@ fun WardrobeScreen(
                 item = item,
                 state = uiState.enhanceImageState,
                 isSaving = uiState.isSavingDisplayImage,
-                onStart = { viewModel.enhanceStartWebMatch() },
+                onStartWebMatch = { viewModel.enhanceStartWebMatch() },
+                onStartAiRender = { viewModel.enhanceStartAiRenderDirect() },
                 onConfirmWebMatch = { viewModel.enhanceConfirmWebMatch() },
                 onShowNextWebCandidate = { viewModel.enhanceShowNextCandidate() },
                 onRejectWebMatch = { viewModel.enhanceRejectWebMatch() },
@@ -272,7 +273,8 @@ private fun EnhanceItemSheet(
     item: ClothingItem,
     state: ImageSourceState,
     isSaving: Boolean,
-    onStart: () -> Unit,
+    onStartWebMatch: () -> Unit,
+    onStartAiRender: () -> Unit,
     onConfirmWebMatch: () -> Unit,
     onShowNextWebCandidate: () -> Unit,
     onRejectWebMatch: () -> Unit,
@@ -291,7 +293,7 @@ private fun EnhanceItemSheet(
         ) {
             Text("Create clean image", style = MaterialTheme.typography.headlineSmall, color = VastraInk)
             Text(
-                "Find a product match or generate a clean image for " +
+                "Choose how to create a clean image for " +
                     "\"${item.subCategory.ifEmpty { item.category.label }}\". " +
                     "The original photo is used only as a private reference.",
                 style = MaterialTheme.typography.bodySmall,
@@ -299,12 +301,29 @@ private fun EnhanceItemSheet(
             )
 
             if (state is ImageSourceState.NotStarted) {
+                // Two independent service buttons — SerpAPI and OpenAI are separate;
+                // neither being configured should block the user from trying the other.
                 Button(
-                    onClick = onStart,
+                    onClick = onStartWebMatch,
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = VastraInk)
-                ) { Text("Find product match", color = VastraCream) }
+                ) {
+                    Icon(Icons.Outlined.Search, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Find product match", color = VastraCream)
+                }
+                OutlinedButton(
+                    onClick = onStartAiRender,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, VastraBorderColor),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = VastraInk)
+                ) {
+                    Icon(Icons.Outlined.AutoAwesome, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Generate clean image")
+                }
             } else {
                 ImageSourceSection(
                     state = state,
@@ -753,12 +772,28 @@ private fun ImageSourceSection(
                     ConfirmedRow(state.renderUrl, "Clean image approved", "AI-generated product photo")
 
                 is ImageSourceState.DisplayImagePending -> {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Filled.Info, null, modifier = Modifier.size(14.dp), tint = VastraMutedText)
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Clean wardrobe image not generated yet",
-                                style = MaterialTheme.typography.bodySmall, color = VastraInk)
-                            Text(state.reason, style = MaterialTheme.typography.labelSmall, color = VastraMutedText)
+                    // Prominent banner so the user can clearly see WHY the state is pending
+                    // (e.g. "SerpAPI not configured") rather than a silent return to buttons.
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFFFF3E0)  // amber tint — visually distinct from the muted card
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.Info, null,
+                                modifier = Modifier.size(16.dp).padding(top = 1.dp),
+                                tint = Color(0xFFE65100)
+                            )
+                            Text(
+                                state.reason,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF6D4C41)
+                            )
                         }
                     }
                     if (state.canRetry) {

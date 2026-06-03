@@ -247,8 +247,13 @@ public class WardrobeService {
             UUID userId, UUID itemId, ClothingItemDto.EnhanceImageRequest req) {
         var item = ownedItem(userId, itemId);
         String cropKey = item.getR2ImageKey();
-        if (cropKey == null || cropKey.isBlank() || !imageEnhancementService.isWebMatchAvailable()) {
-            return new ClothingItemDto.WebMatchResponse(List.of(), imageEnhancementService.isWebMatchAvailable());
+        if (!imageEnhancementService.isWebMatchAvailable()) {
+            log.info("web-match unavailable for item {}: SERPAPI_KEY not configured", itemId);
+            return new ClothingItemDto.WebMatchResponse(List.of(), false);
+        }
+        if (cropKey == null || cropKey.isBlank()) {
+            log.warn("web-match skipped for item {}: no crop reference stored (r2ImageKey is null)", itemId);
+            return new ClothingItemDto.WebMatchResponse(List.of(), true);
         }
         String cropUrl  = r2Service.getPresignedUrl(cropKey);
         String category = override(req != null ? req.category() : null,
@@ -272,8 +277,13 @@ public class WardrobeService {
             UUID userId, UUID itemId, ClothingItemDto.EnhanceImageRequest req) {
         var item = ownedItem(userId, itemId);
         String cropKey = item.getR2ImageKey();
-        if (cropKey == null || cropKey.isBlank() || !imageEnhancementService.isAiRenderAvailable()) {
-            return new ClothingItemDto.AiRenderResponse(null, null, imageEnhancementService.isAiRenderAvailable());
+        if (!imageEnhancementService.isAiRenderAvailable()) {
+            log.info("ai-render unavailable for item {}: OPENAI_API_KEY not configured", itemId);
+            return new ClothingItemDto.AiRenderResponse(null, null, false);
+        }
+        if (cropKey == null || cropKey.isBlank()) {
+            log.warn("ai-render skipped for item {}: no crop reference stored (r2ImageKey is null)", itemId);
+            return new ClothingItemDto.AiRenderResponse(null, null, true);
         }
         String cropUrl  = r2Service.getPresignedUrl(cropKey);
         String category = override(req != null ? req.category() : null,

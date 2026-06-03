@@ -394,7 +394,8 @@ class WardrobeViewModel @Inject constructor(
                     val newState = when {
                         !r.available ->
                             ImageSourceState.DisplayImagePending(
-                                "Web matching is off · set SERPAPI_KEY to enable")
+                                "Web matching is not enabled yet. Configure SERPAPI_KEY on the server.",
+                                            canRetry = false)
                         r.candidates.isEmpty() ->
                             ImageSourceState.DisplayImagePending("No product match found")
                         else ->
@@ -440,7 +441,7 @@ class WardrobeViewModel @Inject constructor(
                     val r = result.data
                     if (!r.available || r.renderUrl == null || r.renderKey == null) {
                         val reason = if (!r.available)
-                            "Clean image unavailable · set SERPAPI_KEY and OPENAI_API_KEY to enable"
+                            "AI clean-image generation is not enabled yet. Configure OPENAI_API_KEY on the server."
                         else
                             "Couldn't generate a clean image"
                         setImageState(index, ImageSourceState.DisplayImagePending(reason))
@@ -501,17 +502,23 @@ class WardrobeViewModel @Inject constructor(
                     val r = result.data
                     val newState = when {
                         !r.available -> ImageSourceState.DisplayImagePending(
-                            "Web matching is off · set SERPAPI_KEY to enable")
-                        r.candidates.isEmpty() -> ImageSourceState.DisplayImagePending("No product match found")
+                            "Web matching is not enabled yet. Configure SERPAPI_KEY on the server to find product matches.",
+                            canRetry = false)
+                        r.candidates.isEmpty() -> ImageSourceState.DisplayImagePending(
+                            "No product match found for this item. You can try generating a clean image instead.")
                         else -> ImageSourceState.WebCandidatesAvailable(r.candidates)
                     }
                     setEnhanceState(newState)
                 }
                 is ApiResult.Error ->
-                    setEnhanceState(ImageSourceState.DisplayImagePending("Web match failed"))
+                    setEnhanceState(ImageSourceState.DisplayImagePending(
+                        "Web match request failed. Check your connection and try again."))
             }
         }
     }
+
+    /** EXPLICIT user action — start an AI render directly (independent of web match). */
+    fun enhanceStartAiRenderDirect() = enhanceRequestAiRender()
 
     fun enhanceShowNextCandidate() {
         val cur = _uiState.value.enhanceImageState
@@ -542,15 +549,16 @@ class WardrobeViewModel @Inject constructor(
                     val r = result.data
                     if (!r.available || r.renderUrl == null || r.renderKey == null) {
                         val reason = if (!r.available)
-                            "Clean image unavailable · set OPENAI_API_KEY to enable"
-                        else "Couldn't generate a clean image"
-                        setEnhanceState(ImageSourceState.DisplayImagePending(reason))
+                            "AI clean-image generation is not enabled yet. Configure OPENAI_API_KEY on the server to generate a clean wardrobe image."
+                        else "Couldn't generate a clean image — the AI service returned an error. Try again or find a product match instead."
+                        setEnhanceState(ImageSourceState.DisplayImagePending(reason, canRetry = r.available))
                     } else {
                         setEnhanceState(ImageSourceState.AiRenderReadyForApproval(r.renderUrl, r.renderKey))
                     }
                 }
                 is ApiResult.Error ->
-                    setEnhanceState(ImageSourceState.DisplayImagePending("Couldn't generate a clean image"))
+                    setEnhanceState(ImageSourceState.DisplayImagePending(
+                        "Clean image generation failed. Check your connection and try again."))
             }
         }
     }
