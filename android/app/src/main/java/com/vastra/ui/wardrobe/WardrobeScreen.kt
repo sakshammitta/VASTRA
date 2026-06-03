@@ -947,7 +947,7 @@ fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit) {
                     // Only show a clean confirmed display image (web product or AI
                     // render). For PENDING items show a placeholder — NEVER the raw
                     // crop, which is reference-only.
-                    val hasCleanImage = item.imageUrl.isNotBlank() &&
+                    val hasCleanImage = !item.imageUrl.isNullOrBlank() &&
                         (item.displayImageSource == "WEB_PRODUCT" ||
                          item.displayImageSource == "AI_RENDER" ||
                          item.displayImageSource == "CROP")  // legacy rows only

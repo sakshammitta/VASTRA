@@ -38,8 +38,11 @@ data class ClothingItem(
     val catalogId: String?,
     val ownerId: String,
     val ownershipStatus: OwnershipStatus,
-    val imageUrl: String,
-    val thumbnailUrl: String?,
+    // Nullable: PENDING items have no confirmed clean display image yet, so the
+    // backend legitimately returns null here. Deserializing this as non-null
+    // crashes the wardrobe card with a NullPointerException.
+    val imageUrl: String? = null,
+    val thumbnailUrl: String? = null,
     val category: ClothingCategory,
     val subCategory: String = "",
     val tags: List<String> = emptyList(),
@@ -50,8 +53,9 @@ data class ClothingItem(
     val priceUsd: Float? = null,
     val styleMatchPercent: Int = 0,
     val addedAt: String = "",
-    // CROP | WEB_PRODUCT | AI_RENDER — lets the wardrobe badge clean display images
-    val displayImageSource: String = "CROP"
+    // PENDING | CROP | WEB_PRODUCT | AI_RENDER — nullable so an absent/unknown
+    // source from the backend never crashes deserialization or the card.
+    val displayImageSource: String? = null
 )
 
 enum class OwnershipStatus { OWNED, ASPIRATIONAL }
