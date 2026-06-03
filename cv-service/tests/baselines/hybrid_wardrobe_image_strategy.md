@@ -19,10 +19,35 @@ display_image_key if set, else r2_image_key. Changing the display image NEVER
 changes the canonical attributes used by recommendations.
 
 ## Display-source priority (highest first)
-1. WEB_PRODUCT — strong web/product-catalog match the user CONFIRMED
-2. AI_RENDER   — clean standalone render generated from the detected garment
-                 when no strong web match exists
-3. CROP        — the real extracted crop (always available; safe fallback)
+1. WEB_PRODUCT — web/product match the user explicitly CONFIRMED ("Yes, use this")
+2. AI_RENDER   — clean gpt-image-2 render the user explicitly APPROVED ("Use this clean image")
+3. PENDING     — no clean image confirmed yet → app shows a placeholder
+                 ("Clean wardrobe image not generated yet"), NEVER the raw crop.
+   (CROP exists only for backward compatibility with pre-policy rows; new items
+    are never written as CROP. The raw crop is reference/evidence/search input only.)
+
+## Per-item display-image state machine (review flow)
+SEARCHING_WEB → WEB_CANDIDATES_AVAILABLE → (Yes, use this) → WEB_CONFIRMED ✓
+                                         → (Show alternatives) → next candidate
+                                         → (None of these) → GENERATING_AI_RENDER
+              → (no candidates / SerpAPI off) → GENERATING_AI_RENDER
+GENERATING_AI_RENDER → AI_RENDER_READY_FOR_APPROVAL → (Use this clean image) → AI_RENDER_CONFIRMED ✓
+                                                    → (Regenerate) → GENERATING_AI_RENDER
+                                                    → (Try another match) → SEARCHING_WEB
+                     → (render failed / OpenAI off) → DISPLAY_IMAGE_PENDING
+Only WEB_CONFIRMED ✓ and AI_RENDER_CONFIRMED ✓ produce a final wardrobe image.
+Neither auto-confirms — both require an explicit user tap.
+
+## Endpoints
+POST /api/wardrobe/scan/{jobId}/items/{idx}/web-match
+  → { candidates: [{title,imageUrl,sourceUrl,siteName}], available }
+  Sends ONLY the garment crop's short-lived presigned URL (item-crops/…) to
+  SerpAPI Google Lens — never the full selfie (scans/…), never a public URL.
+POST /api/wardrobe/scan/{jobId}/items/{idx}/ai-render
+  → { renderUrl, renderKey, available }   (gpt-image-2, uploaded to R2)
+POST /api/wardrobe/scan/{jobId}/confirm
+  body adds: webMatchImageUrl?, webMatchSourceUrl?, aiRenderKey?
+  Omit all → item saved as PENDING (placeholder, never crop).
 
 ## Hard rules
 - NEVER silently replace the real item with a web/AI image. WEB_PRODUCT and

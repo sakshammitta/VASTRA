@@ -42,7 +42,7 @@ public class ClothingItemEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "display_image_source", nullable = false)
-    private DisplayImageSource displayImageSource = DisplayImageSource.CROP;
+    private DisplayImageSource displayImageSource = DisplayImageSource.PENDING;
 
     @Enumerated(EnumType.STRING)
     private ClothingCategory category;
@@ -196,12 +196,26 @@ public class ClothingItemEntity {
     }
 
     /**
-     * The image key to actually render in the app: the confirmed cleaner display
-     * image when present, otherwise the real extracted crop (truth). Never null
-     * unless the crop itself is missing.
+     * The image key to actually render in the app: ONLY a confirmed clean display
+     * image (web product match or approved AI render). Returns null when no clean
+     * display image has been confirmed — the app must then show a placeholder, NOT
+     * the raw crop. The messy source crop (r2ImageKey) is reference-only and is
+     * never shown as the wardrobe item.
+     *
+     * <p>Legacy rows written with source=CROP still resolve to their stored
+     * displayImageKey/r2ImageKey for backward compatibility.
      */
     public String getEffectiveImageKey() {
-        return displayImageKey != null ? displayImageKey : r2ImageKey;
+        if (displayImageSource == DisplayImageSource.WEB_PRODUCT
+                || displayImageSource == DisplayImageSource.AI_RENDER) {
+            return displayImageKey;
+        }
+        if (displayImageSource == DisplayImageSource.CROP) {
+            // Backward compat only — never produced for new items.
+            return displayImageKey != null ? displayImageKey : r2ImageKey;
+        }
+        // PENDING (or any unconfirmed state): no clean image yet.
+        return null;
     }
 
     public ClothingCategory getCategory() {

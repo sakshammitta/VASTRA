@@ -22,12 +22,19 @@ import java.util.Map;
  *                   returns up to 5 visual-match candidates for user confirmation.
  *                   Requires SERPAPI_KEY env var.
  *
- * 2. AI_RENDER    — OpenAI gpt-image-1 text-prompt generation using detected
+ * 2. AI_RENDER    — OpenAI gpt-image-2 text-prompt generation using detected
  *                   garment attributes (category, subtype, colors, brand).
  *                   Requires OPENAI_API_KEY env var.
  *
  * Both services degrade gracefully when API keys are absent: callers receive
- * empty candidate lists or null render keys and fall back to CROP display.
+ * empty candidate lists or null render keys, and the item stays PENDING (the
+ * app shows a placeholder, never the raw crop).
+ *
+ * PRIVACY (SerpAPI input image): searchWebMatches() is passed ONLY the detected
+ * garment crop's presigned URL (R2 key under "item-crops/"), never the full
+ * source selfie. R2Service.getPresignedUrl produces a short-lived signed URL
+ * (1-hour expiry) unless a public-url base is configured. The user's original
+ * outfit photo (R2 key under "scans/") is never sent to SerpAPI.
  */
 @Service
 public class ImageEnhancementService {
@@ -94,7 +101,7 @@ public class ImageEnhancementService {
     }
 
     /**
-     * Generate a clean fashion product image with gpt-image-1.
+     * Generate a clean fashion product image with gpt-image-2.
      * Uploads the result to R2 and returns the R2 key, or null on failure.
      */
     public String generateAiRender(
@@ -108,16 +115,18 @@ public class ImageEnhancementService {
         String brandDesc  = (brand != null && !brand.isBlank()) ? brand + " " : "";
         String garment    = subCategory.isBlank() ? category.toLowerCase() : subCategory;
         String prompt     = String.format(
-            "Clean fashion e-commerce product photograph of a %s%s%s. " +
-            "Upright, centered, isolated on plain white background. " +
-            "No person, no body parts, no hands, no arms, no background. " +
-            "Professional product shot, Zara or H&M online store style. High quality.",
+            "Realistic fashion e-commerce product photograph of a %s%s%s. " +
+            "Upright, centered, isolated garment on a clean plain neutral background. " +
+            "No person, no body parts, no hands, no arms, no phone, no background scene, " +
+            "no crop fragments. Preserve the garment's color, type and any visible brand " +
+            "graphic as faithfully as possible. Professional product shot, Zara / H&M / " +
+            "ASOS online store style. High quality.",
             brandDesc, garment, colorDesc
         );
 
         try {
             String requestJson = objectMapper.writeValueAsString(Map.of(
-                "model", "gpt-image-1",
+                "model", "gpt-image-2",
                 "prompt", prompt,
                 "n", 1,
                 "size", "1024x1024",

@@ -21,24 +21,60 @@ import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 
-/** Tracks the image-source selection state for a single item in the review sheet. */
+/**
+ * Explicit display-image state for a single detected item in the review sheet.
+ *
+ * Only [WebConfirmed] or [AiRenderConfirmed] may become the final wardrobe image.
+ * Every other state saves the item as PENDING (placeholder shown, never the crop).
+ *
+ * Transitions:
+ *   SearchingWeb ─► WebCandidatesAvailable ─(Yes)─► WebConfirmed
+ *                                          ─(Show alternatives)─► WebCandidatesAvailable (next candidate)
+ *                                          ─(None of these)─► GeneratingAiRender
+ *               ─► DisplayImagePending (no candidates / not configured) ─► GeneratingAiRender
+ *   GeneratingAiRender ─► AiRenderReadyForApproval ─(Use this)─► AiRenderConfirmed
+ *                                                  ─(Regenerate)─► GeneratingAiRender
+ *                                                  ─(Try another match)─► WebCandidatesAvailable / SearchingWeb
+ *                      ─► DisplayImagePending (render failed / not configured)
+ */
 sealed class ImageSourceState {
-    /** Initial state — search not yet started. */
-    object Idle : ImageSourceState()
-    /** SerpAPI Google Lens search in progress. */
+    /** SERPAPI Google Lens search in progress. */
     object SearchingWeb : ImageSourceState()
-    /** One or more visual-match candidates returned; user must confirm or reject. */
-    data class WebCandidates(val candidates: List<WebMatchCandidate>) : ImageSourceState()
-    /** Web search returned no usable candidates. */
-    object NoWebMatch : ImageSourceState()
-    /** User confirmed a web match candidate. */
+
+    /**
+     * One or more visual-match candidates returned. [shownIndex] selects which
+     * candidate is currently displayed; "Show alternatives" advances it.
+     * NEVER auto-confirmed — the user must explicitly tap "Yes, use this".
+     */
+    data class WebCandidatesAvailable(
+        val candidates: List<WebMatchCandidate>,
+        val shownIndex: Int = 0
+    ) : ImageSourceState() {
+        val current: WebMatchCandidate get() = candidates[shownIndex]
+        val hasMore: Boolean get() = candidates.size > 1
+    }
+
+    /** User confirmed a web match candidate — eligible to be the final image. */
     data class WebConfirmed(val candidate: WebMatchCandidate) : ImageSourceState()
-    /** gpt-image-1 render in progress. */
-    object Rendering : ImageSourceState()
-    /** Render complete; renderUrl is the presigned URL for preview, renderKey is the R2 key. */
-    data class AiRendered(val renderUrl: String, val renderKey: String) : ImageSourceState()
-    /** Render failed or OpenAI not configured. */
-    object AiRenderUnavailable : ImageSourceState()
+
+    /** gpt-image-2 render in progress. */
+    object GeneratingAiRender : ImageSourceState()
+
+    /**
+     * Render complete and awaiting approval. NOT saved automatically — the user
+     * must tap "Use this clean image". renderUrl previews it; renderKey is the R2 key.
+     */
+    data class AiRenderReadyForApproval(val renderUrl: String, val renderKey: String) : ImageSourceState()
+
+    /** User approved the AI render — eligible to be the final image. */
+    data class AiRenderConfirmed(val renderUrl: String, val renderKey: String) : ImageSourceState()
+
+    /**
+     * No clean display image available (no web candidates AND render failed or
+     * neither service configured). The item will save as PENDING and show a
+     * placeholder — never the raw crop. [canRetry] enables a manual retry button.
+     */
+    data class DisplayImagePending(val reason: String, val canRetry: Boolean = true) : ImageSourceState()
 }
 
 data class WardrobeUiState(
@@ -250,9 +286,11 @@ class WardrobeViewModel @Inject constructor(
             _uiState.update { it.copy(isConfirming = true) }
             val edits = _uiState.value
             for (index in indices) {
+                // Only an explicitly confirmed web match or approved AI render
+                // becomes the display image. Anything else saves as PENDING.
                 val imgState = edits.imageSourceStates[index]
                 val webCandidate = (imgState as? ImageSourceState.WebConfirmed)?.candidate
-                val aiRenderKey  = (imgState as? ImageSourceState.AiRendered)?.renderKey
+                val aiRenderKey  = (imgState as? ImageSourceState.AiRenderConfirmed)?.renderKey
                 repo.confirmScanItem(
                     jobId = jobId,
                     itemIndex = index,
@@ -291,59 +329,95 @@ class WardrobeViewModel @Inject constructor(
 
     // ── Image source methods ─────────────────────────────────────────────────
 
+    private fun setImageState(index: Int, state: ImageSourceState) {
+        _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to state)) }
+    }
+
+    /**
+     * Start the SerpAPI Google Lens search. Auto-started on scan complete; safe
+     * to call again ("Try another match"). Sends only the garment crop URL.
+     * Candidates are NEVER auto-confirmed — the user must tap "Yes, use this".
+     */
     fun requestWebMatch(jobId: String, index: Int) {
-        _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to ImageSourceState.SearchingWeb)) }
+        setImageState(index, ImageSourceState.SearchingWeb)
         viewModelScope.launch {
             when (val result = repo.requestWebMatch(jobId, index)) {
                 is ApiResult.Success -> {
                     val r = result.data
-                    val newState = when {
-                        !r.available          -> ImageSourceState.AiRenderUnavailable
-                        r.candidates.isEmpty() -> ImageSourceState.NoWebMatch
-                        else                   -> ImageSourceState.WebCandidates(r.candidates)
-                    }
-                    _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to newState)) }
-                    // If no web match found, automatically start AI render
-                    if (newState is ImageSourceState.NoWebMatch) {
-                        requestAiRender(index)
+                    when {
+                        !r.available ->
+                            // SerpAPI not configured — go straight to AI render path.
+                            requestAiRender(index)
+                        r.candidates.isEmpty() ->
+                            // No visual matches — fall through to AI render.
+                            requestAiRender(index)
+                        else ->
+                            setImageState(index, ImageSourceState.WebCandidatesAvailable(r.candidates))
                     }
                 }
-                is ApiResult.Error -> {
-                    _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to ImageSourceState.NoWebMatch)) }
-                    requestAiRender(index)
-                }
+                is ApiResult.Error -> requestAiRender(index)
             }
         }
     }
 
-    fun confirmWebMatch(index: Int, candidate: WebMatchCandidate) {
-        _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to ImageSourceState.WebConfirmed(candidate))) }
+    /** "Show alternatives" — cycle to the next web candidate without confirming. */
+    fun showNextWebCandidate(index: Int) {
+        val cur = _uiState.value.imageSourceStates[index]
+        if (cur is ImageSourceState.WebCandidatesAvailable) {
+            val next = (cur.shownIndex + 1) % cur.candidates.size
+            setImageState(index, cur.copy(shownIndex = next))
+        }
     }
 
+    /** "Yes, use this" — confirm the currently-shown web candidate. */
+    fun confirmWebMatch(index: Int) {
+        val cur = _uiState.value.imageSourceStates[index]
+        if (cur is ImageSourceState.WebCandidatesAvailable) {
+            setImageState(index, ImageSourceState.WebConfirmed(cur.current))
+        }
+    }
+
+    /** "None of these — generate clean image" — abandon web match, start render. */
     fun rejectWebMatch(index: Int) {
         requestAiRender(index)
     }
 
+    /** Start (or "Regenerate") a gpt-image-2 render. Awaits user approval. */
     fun requestAiRender(index: Int) {
         val jobId = _uiState.value.pendingJobId ?: return
-        _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to ImageSourceState.Rendering)) }
+        setImageState(index, ImageSourceState.GeneratingAiRender)
         viewModelScope.launch {
             when (val result = repo.requestAiRender(jobId, index)) {
                 is ApiResult.Success -> {
                     val r = result.data
-                    val newState = when {
-                        !r.available || r.renderUrl == null || r.renderKey == null ->
-                            ImageSourceState.AiRenderUnavailable
-                        else ->
-                            ImageSourceState.AiRendered(r.renderUrl, r.renderKey)
+                    if (!r.available || r.renderUrl == null || r.renderKey == null) {
+                        val reason = if (!r.available)
+                            "Clean image unavailable · set SERPAPI_KEY and OPENAI_API_KEY to enable"
+                        else
+                            "Couldn't generate a clean image"
+                        setImageState(index, ImageSourceState.DisplayImagePending(reason))
+                    } else {
+                        setImageState(index, ImageSourceState.AiRenderReadyForApproval(r.renderUrl, r.renderKey))
                     }
-                    _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to newState)) }
                 }
-                is ApiResult.Error -> {
-                    _uiState.update { it.copy(imageSourceStates = it.imageSourceStates + (index to ImageSourceState.AiRenderUnavailable)) }
-                }
+                is ApiResult.Error ->
+                    setImageState(index, ImageSourceState.DisplayImagePending("Couldn't generate a clean image"))
             }
         }
+    }
+
+    /** "Use this clean image" — approve the AI render as the final display image. */
+    fun confirmAiRender(index: Int) {
+        val cur = _uiState.value.imageSourceStates[index]
+        if (cur is ImageSourceState.AiRenderReadyForApproval) {
+            setImageState(index, ImageSourceState.AiRenderConfirmed(cur.renderUrl, cur.renderKey))
+        }
+    }
+
+    /** "Try another match" — go back to web candidates (if any) or re-search. */
+    fun tryAnotherMatch(index: Int) {
+        val jobId = _uiState.value.pendingJobId ?: return
+        requestWebMatch(jobId, index)
     }
 
     fun deleteItem(itemId: String) {

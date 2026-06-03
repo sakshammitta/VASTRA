@@ -149,11 +149,13 @@ public class WardrobeService {
         item.setAiModelSource(AI_MODEL_SOURCE);
 
         // ── Display image selection ───────────────────────────────────────────
-        // The caller may have gone through the web-match or AI-render flow;
-        // store their chosen clean display image so the wardrobe never shows
-        // the raw messy crop. The truth crop stays in r2ImageKey unchanged.
+        // Only a user-confirmed web product match or a user-approved AI render
+        // may become the wardrobe display image. If neither was confirmed, the
+        // item is saved as PENDING — the app shows a placeholder, NEVER the raw
+        // crop. The truth crop stays in r2ImageKey (reference/evidence only).
         String webMatchImageUrl = req.webMatchImageUrl();
         String aiRenderKey      = req.aiRenderKey();
+        item.setDisplayImageSource(DisplayImageSource.PENDING);
         if (webMatchImageUrl != null && !webMatchImageUrl.isBlank()) {
             // Download the confirmed web product thumbnail and store it in R2
             // so the display image is under VASTRA's control and won't expire.

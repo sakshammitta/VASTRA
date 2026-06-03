@@ -29,7 +29,7 @@ public class ClothingItemDto {
                 item.getPurchasePlatform(), item.getPurchaseUrl(), item.getPriceUsd(),
                 item.getStyleMatchPercent(),
                 item.getAddedAt() != null ? item.getAddedAt().toString() : null,
-                item.getDisplayImageSource() != null ? item.getDisplayImageSource().name() : "CROP"
+                item.getDisplayImageSource() != null ? item.getDisplayImageSource().name() : "PENDING"
             );
         }
     }
