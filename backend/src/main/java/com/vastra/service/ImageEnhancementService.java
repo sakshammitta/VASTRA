@@ -42,13 +42,22 @@ public class ImageEnhancementService {
     private static final Logger log = LoggerFactory.getLogger(ImageEnhancementService.class);
 
     // ── Domain quality tiers ─────────────────────────────────────────────────
-    // +3: official brand / top-tier fashion retailers — clean product photography
+    // Tier 3 (best): official brand / club stores + top-tier fashion retailers.
     private static final Set<String> PREFERRED_DOMAINS = Set.of(
-        "nike.com", "adidas.com", "zara.com", "hm.com", "uniqlo.com",
-        "gap.com", "levi.com", "levis.com", "ralphlauren.com",
-        "tommyhilfiger.com", "calvinklein.com", "guess.com",
-        "lacoste.com", "champion.com", "puma.com", "newbalance.com",
-        "underarmour.com", "columbia.com", "patagonia.com", "arc'teryx.com",
+        // Sportswear & athleisure brands (joggers / track pants live here)
+        "nike.com", "adidas.com", "puma.com", "newbalance.com", "reebok.com",
+        "underarmour.com", "champion.com", "lululemon.com", "gymshark.com",
+        "asics.com", "fila.com", "kappa.com", "umbro.com",
+        // Football club / team stores
+        "manutd.com", "store.manutd.com", "mancity.com", "arsenal.com",
+        "chelseafc.com", "liverpoolfc.com", "tottenhamhotspur.com",
+        "realmadrid.com", "fcbarcelona.com", "juventus.com",
+        "fanatics.com", "fanatics.co.uk",
+        // Fashion brands
+        "zara.com", "hm.com", "uniqlo.com", "gap.com", "levi.com", "levis.com",
+        "ralphlauren.com", "tommyhilfiger.com", "calvinklein.com", "guess.com",
+        "lacoste.com", "columbia.com", "patagonia.com", "arcteryx.com",
+        // Top-tier multi-brand retailers
         "asos.com", "nordstrom.com", "ssense.com", "farfetch.com",
         "mrporter.com", "endclothing.com", "urbanoutfitters.com",
         "anthropologie.com", "freepeople.com", "revolve.com",
@@ -57,33 +66,41 @@ public class ImageEnhancementService {
         "myntra.com", "ajio.com", "nykaa.com"
     );
 
-    // +1: broader fashion / department retail — usually has clean product images
+    // Tier 2: broader fashion / department retail — usually clean product images.
     private static final Set<String> ACCEPTABLE_DOMAINS = Set.of(
-        "amazon.com", "target.com", "walmart.com", "macys.com",
-        "bloomingdales.com", "saks.com", "saksfifthavenue.com",
-        "google.com",           // Google Shopping passes through google.com
-        "shopping.google.com",
+        "amazon.com", "amazon.co.uk", "amazon.in", "target.com", "walmart.com",
+        "macys.com", "bloomingdales.com", "saks.com", "saksfifthavenue.com",
+        "google.com", "shopping.google.com",   // Google Shopping pass-through
         "kohls.com", "jcrew.com", "bananarepublic.com", "oldnavy.com",
-        "forever21.com", "primark.com", "pull&bear.com", "bershka.com",
+        "forever21.com", "primark.com", "bershka.com",
         "stradivarius.com", "mango.com", "next.co.uk", "boohoo.com",
         "prettylittlething.com", "missguided.com", "topshop.com",
         "river-island.com", "riverisland.com", "acnestudios.com",
-        "aritzia.com", "reiss.com", "allsaints.com", "& other stories",
-        "stories.com", "weekday.com", "arket.com", "cosstores.com"
+        "aritzia.com", "reiss.com", "allsaints.com",
+        "stories.com", "weekday.com", "arket.com", "cosstores.com",
+        "sportsdirect.com", "jdsports.com", "jdsports.co.uk", "footlocker.com",
+        "finishline.com", "prodirectsport.com", "kitbag.com"
     );
 
-    // Hard-blocked: resale / social / blog — never clean product photos
+    // Hard-blocked: resale / social / blog / noisy aggregators / dropship —
+    // never clean first-party product photography. Always excluded.
     private static final Set<String> BLOCKED_DOMAINS = Set.of(
-        "ebay.com", "ebay.co.uk", "ebay.ca", "ebay.au",
+        // Resale / secondhand marketplaces
+        "ebay.com", "ebay.co.uk", "ebay.ca", "ebay.com.au", "ebay.de",
         "poshmark.com", "depop.com", "mercari.com", "grailed.com",
-        "vinted.com", "thredup.com", "therealreal.com",
-        "tradesy.com", "vestiaire.com",
-        "pinterest.com", "pinterest.co.uk",
-        "reddit.com", "imgur.com", "tumblr.com",
-        "instagram.com", "facebook.com", "tiktok.com",
-        "twitter.com", "x.com",
+        "vinted.com", "vinted.co.uk", "thredup.com", "therealreal.com",
+        "tradesy.com", "vestiairecollective.com", "vestiaire.com",
+        // Social / blogs / image hosts
+        "pinterest.com", "pinterest.co.uk", "reddit.com", "imgur.com",
+        "tumblr.com", "instagram.com", "facebook.com", "tiktok.com",
+        "twitter.com", "x.com", "youtube.com",
+        // Dropship / low-trust marketplaces
         "aliexpress.com", "alibaba.com", "dhgate.com", "wish.com", "temu.com",
-        "shein.com"
+        "shein.com", "lightinthebox.com", "banggood.com",
+        // Noisy football-kit aggregators / listing farms
+        "footy.com", "footyheadlines.com", "footballshirtculture.com",
+        "classicfootballshirts.com", "vintagefootballshirts.com",
+        "kitbag-aggregator.com"
     );
 
     // Minimum acceptable thumbnail width/height in pixels (SerpAPI provides
@@ -137,9 +154,9 @@ public class ImageEnhancementService {
 
             JsonNode root = objectMapper.readTree(body);
 
-            // Scoring keywords: user-confirmed subtype and brand
-            String subLower   = subCategory == null ? "" : subCategory.toLowerCase();
-            String brandLower = brand == null ? "" : brand.toLowerCase();
+            // Scoring keywords: user-confirmed subtype + brand/identity tokens.
+            String subLower = subCategory == null ? "" : subCategory.toLowerCase();
+            List<String> brandTokens = brandTokens(brand);
 
             List<ScoredCandidate> pool = new ArrayList<>();
 
@@ -155,7 +172,7 @@ public class ImageEnhancementService {
                     if (sourceUrl.isBlank()) sourceUrl = p.path("product_link").asText("");
                     String siteName  = p.path("source").asText("");
                     if (!imageUrl.isBlank() && !sourceUrl.isBlank()) {
-                        int score = scoreCandidate(sourceUrl, title, subLower, brandLower,
+                        int score = scoreCandidate(sourceUrl, title, subLower, brandTokens,
                                 p.path("original_dimensions"),
                                 /* fromProductsArray= */ true);
                         if (score > Integer.MIN_VALUE) {
@@ -175,7 +192,7 @@ public class ImageEnhancementService {
                     String sourceUrl = m.path("link").asText("");
                     String siteName  = m.path("source").asText("");
                     if (!imageUrl.isBlank() && !sourceUrl.isBlank()) {
-                        int score = scoreCandidate(sourceUrl, title, subLower, brandLower,
+                        int score = scoreCandidate(sourceUrl, title, subLower, brandTokens,
                                 m.path("original_dimensions"),
                                 /* fromProductsArray= */ false);
                         if (score > Integer.MIN_VALUE) {
@@ -219,51 +236,97 @@ public class ImageEnhancementService {
     }
 
     /**
-     * Score a single candidate. Returns {@code Integer.MIN_VALUE} to signal
-     * "hard reject" (blocked domain or image too small). Otherwise returns a
-     * score ≥ −1 that reflects how suitable this image is as a wardrobe display:
+     * Score a single candidate. Returns {@code Integer.MIN_VALUE} to signal a
+     * HARD REJECT, which happens for any of:
+     *   - blocked domain (resale / social / aggregator / dropship)
+     *   - thumbnail below the minimum dimension
+     *   - UNKNOWN domain that is neither preferred nor acceptable nor a detected
+     *     official brand site. (This is the key fix: title/brand keyword bonuses
+     *     can NO LONGER lift an unknown aggregator like footy.com above the floor.
+     *     Only a recognised clean retailer/brand domain is ever eligible.)
      *
-     *  +3  preferred brand / top retailer domain
-     *  +1  acceptable fashion / department store domain
-     *   0  unknown domain (neutral — user can decide)
-     *  −1  negative indicator (no domain match, no product context)
-     *  +2  extra: from the products array (shopping-context signals quality)
-     *  +1  extra: confirmed subtype appears in the title
-     *  +1  extra: confirmed brand appears in the title
+     * Eligible candidates score with the DOMAIN TIER dominant, so ranking is
+     * always brand/retailer-first; small title/brand bonuses only re-order
+     * within a tier:
+     *
+     *  1000  official brand site (domain contains the detected brand token)
+     *   900  preferred brand / club store / top retailer domain
+     *   500  acceptable fashion / department retailer domain
+     *  + 50  from the Lens "products" (shopping-context) array
+     *  + 10  confirmed subtype (e.g. "joggers") appears in the title
+     *  + 10  a brand/identity token (e.g. "adidas", "manchester") in the title
      */
     private int scoreCandidate(String sourceUrl, String title,
-                               String subLower, String brandLower,
+                               String subLower, List<String> brandTokens,
                                JsonNode dims, boolean fromProductsArray) {
         String host = rootDomain(sourceUrl);
 
-        // Hard block resale / social / low-trust sites.
+        // 1. Hard block resale / social / aggregator / dropship sites.
         if (isBlocked(host)) {
-            log.debug("web-match: blocked domain {} — skipping", host);
+            log.debug("web-match: blocked domain {} — rejecting", host);
             return Integer.MIN_VALUE;
         }
 
-        // Dimension filter: skip thumbnails too small to be clean product shots.
+        // 2. Dimension filter: skip thumbnails too small to be clean product shots.
         if (dims != null && !dims.isMissingNode()) {
             int w = dims.path("width").asInt(0);
             int h = dims.path("height").asInt(0);
             if ((w > 0 && w < MIN_DIMENSION_PX) || (h > 0 && h < MIN_DIMENSION_PX)) {
-                log.debug("web-match: thumbnail too small ({}x{}) — skipping {}", w, h, host);
+                log.debug("web-match: thumbnail too small ({}x{}) — rejecting {}", w, h, host);
                 return Integer.MIN_VALUE;
             }
         }
 
-        int score = 0;
-        if (isPreferred(host))   score += 3;
-        else if (isAcceptable(host)) score += 1;
-        else score -= 1;   // unknown domain: slight negative
+        // 3. Domain tier — UNKNOWN domains are rejected outright.
+        boolean brandSite = isBrandOwnedDomain(host, brandTokens);
+        int base;
+        if (brandSite)            base = 1000;
+        else if (isPreferred(host)) base = 900;
+        else if (isAcceptable(host)) base = 500;
+        else {
+            log.debug("web-match: unrecognised domain {} — rejecting (not a clean retailer)", host);
+            return Integer.MIN_VALUE;
+        }
 
-        if (fromProductsArray)   score += 2;  // shopping-context signal
-
+        // 4. Minor re-ranking bonuses within the tier.
+        int score = base;
+        if (fromProductsArray) score += 50;
         String titleLower = title.toLowerCase();
-        if (!subLower.isBlank() && titleLower.contains(subLower))     score += 1;
-        if (!brandLower.isBlank() && titleLower.contains(brandLower)) score += 1;
-
+        if (!subLower.isBlank() && titleLower.contains(subLower)) score += 10;
+        for (String t : brandTokens) {
+            if (t.length() >= 3 && titleLower.contains(t)) { score += 10; break; }
+        }
         return score;
+    }
+
+    /**
+     * True when the host looks like the official store for a detected brand —
+     * e.g. brand token "adidas" → adidas.com, "manchester"/"united" → manutd.com
+     * is handled by the preferred list, but a generic brand site not in the list
+     * is still recognised here by token-in-host match.
+     */
+    private boolean isBrandOwnedDomain(String host, List<String> brandTokens) {
+        // Strip the TLD so "adidas" matches "adidas.com" but not random paths.
+        int dot = host.indexOf('.');
+        String label = dot > 0 ? host.substring(0, dot) : host;
+        for (String t : brandTokens) {
+            if (t.length() >= 3 && label.contains(t)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Split a brand/identity string into lowercase alphanumeric tokens of length
+     * ≥ 3, used both for title relevance and official-domain detection.
+     * e.g. "Adidas Manchester United" → ["adidas", "manchester", "united"].
+     */
+    private static List<String> brandTokens(String brand) {
+        if (brand == null || brand.isBlank()) return List.of();
+        List<String> tokens = new ArrayList<>();
+        for (String raw : brand.toLowerCase().split("[^a-z0-9]+")) {
+            if (raw.length() >= 3) tokens.add(raw);
+        }
+        return tokens;
     }
 
     /** Extract registrable domain (e.g. "ebay.com") from a URL for blocklist checks. */
