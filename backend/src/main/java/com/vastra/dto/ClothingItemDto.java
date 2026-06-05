@@ -99,7 +99,10 @@ public class ClothingItemDto {
 
     /**
      * Response from POST /scan/{jobId}/items/{idx}/web-match.
-     * available=false means SerpAPI is not configured in this environment.
+     * available=false  — SerpAPI key not configured.
+     * candidates empty — results were found but ALL scored ≤ 0 (resale/social/low
+     *                    quality only). The client should show "No clean product
+     *                    match found" and offer AI render instead.
      */
     public record WebMatchResponse(
         List<WebMatchCandidate> candidates,

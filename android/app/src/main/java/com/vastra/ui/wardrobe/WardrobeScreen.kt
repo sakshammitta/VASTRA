@@ -797,20 +797,19 @@ private fun ImageSourceSection(
                         }
                     }
                     if (state.canRetry) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                onClick = onTryAnotherMatch,
-                                modifier = Modifier.weight(1f).height(36.dp),
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, VastraBorderColor)
-                            ) { Text("Find web match", style = MaterialTheme.typography.labelSmall, color = VastraInk) }
-                            OutlinedButton(
-                                onClick = onRegenerateAiRender,
-                                modifier = Modifier.weight(1f).height(36.dp),
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, VastraBorderColor)
-                            ) { Text("Generate clean image", style = MaterialTheme.typography.labelSmall, color = VastraInk) }
-                        }
+                        // AI render is the primary action when no clean web match exists.
+                        Button(
+                            onClick = onRegenerateAiRender,
+                            modifier = Modifier.fillMaxWidth().height(36.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = VastraInk)
+                        ) { Text("Generate clean image", style = MaterialTheme.typography.labelSmall, color = VastraCream) }
+                        OutlinedButton(
+                            onClick = onTryAnotherMatch,
+                            modifier = Modifier.fillMaxWidth().height(36.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, VastraBorderColor)
+                        ) { Text("Try web match again", style = MaterialTheme.typography.labelSmall, color = VastraInk) }
                     }
                 }
             }

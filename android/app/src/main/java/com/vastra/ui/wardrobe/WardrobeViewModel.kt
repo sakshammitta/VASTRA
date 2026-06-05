@@ -395,9 +395,11 @@ class WardrobeViewModel @Inject constructor(
                         !r.available ->
                             ImageSourceState.DisplayImagePending(
                                 "Web matching is not enabled yet. Configure SERPAPI_KEY on the server.",
-                                            canRetry = false)
+                                canRetry = false)
                         r.candidates.isEmpty() ->
-                            ImageSourceState.DisplayImagePending("No product match found")
+                            // All search results were resale/low-quality and were filtered out.
+                            ImageSourceState.DisplayImagePending(
+                                "No clean product match found. Generate a clean wardrobe image instead.")
                         else ->
                             ImageSourceState.WebCandidatesAvailable(r.candidates)
                     }
@@ -505,7 +507,7 @@ class WardrobeViewModel @Inject constructor(
                             "Web matching is not enabled yet. Configure SERPAPI_KEY on the server to find product matches.",
                             canRetry = false)
                         r.candidates.isEmpty() -> ImageSourceState.DisplayImagePending(
-                            "No product match found for this item. You can try generating a clean image instead.")
+                            "No clean product match found. Generate a clean wardrobe image instead.")
                         else -> ImageSourceState.WebCandidatesAvailable(r.candidates)
                     }
                     setEnhanceState(newState)
