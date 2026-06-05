@@ -55,7 +55,10 @@ interface VastraApiService {
 
     @POST("api/wardrobe/scan")
     @Multipart
-    suspend fun scanItem(@Part image: MultipartBody.Part): Response<ScanJobResponse>
+    suspend fun scanItem(
+        @Part image: MultipartBody.Part,
+        @Part("scan_mode") scanMode: okhttp3.RequestBody
+    ): Response<ScanJobResponse>
 
     @GET("api/wardrobe/scan/{jobId}")
     suspend fun getScanStatus(@Path("jobId") jobId: String): Response<ScanJob>

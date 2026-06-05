@@ -16,6 +16,7 @@ _r2 = r2_module.R2Client()
 
 class ScanAndEmbedRequest(BaseModel):
     image_key: str
+    scan_mode: str = "outfit"  # "single" | "outfit"
 
 
 @router.post("/full", response_model=EmbedResponse)
@@ -25,9 +26,9 @@ async def scan_and_embed(request: ScanAndEmbedRequest):
     pipeline (DINO detection → crop → FashionCLIP classify + embed → colors),
     and return EmbedResponse items.  Called by the backend for every app scan.
 
-    Uses detect_worn_outfit() (WORN_OUTFIT_PROMPT, box=0.25, area floor=0.02)
-    instead of the old detect_clothing() which used CLOTHING_PROMPT at box=0.35
-    and returned 0 detections on real worn-outfit photos (baseline 2026-06-02).
+    scan_mode="outfit" (default): detect_worn_outfit() — all garments.
+    scan_mode="single": detect_single_item() — dominant/centred garment only,
+      dropping border-touching boxes and keeping only the top area×centrality item.
     """
     t0_total = time.perf_counter()
 
@@ -39,8 +40,11 @@ async def scan_and_embed(request: ScanAndEmbedRequest):
         raise HTTPException(status_code=404, detail=f"Image not found: {request.image_key}")
 
     t0 = time.perf_counter()
-    detections = detector.detect_worn_outfit(image)
-    logger.info(f"timing dino-inference: {(time.perf_counter() - t0)*1000:.0f}ms  detections={len(detections)}")
+    if request.scan_mode == "single":
+        detections = detector.detect_single_item(image)
+    else:
+        detections = detector.detect_worn_outfit(image)
+    logger.info(f"timing dino-inference: {(time.perf_counter() - t0)*1000:.0f}ms  scan_mode={request.scan_mode} detections={len(detections)}")
 
     items = _embed_detections(image, detections)
     logger.info(f"timing full-pipeline: {(time.perf_counter() - t0_total)*1000:.0f}ms  items={len(items)}")

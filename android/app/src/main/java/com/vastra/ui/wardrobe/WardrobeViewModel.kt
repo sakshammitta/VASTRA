@@ -90,6 +90,8 @@ data class WardrobeUiState(
     val error: String? = null,
     val selectedCategory: ClothingCategory? = null,
     val showAddSheet: Boolean = false,
+    // "single" keeps only the dominant centred garment; "outfit" keeps all detected pieces.
+    val scanMode: String = "single",
     // Non-null while a scan is still polling
     val activeScanJobs: Map<String, ScanJob> = emptyMap(),
     // Non-null when scan is COMPLETE and user needs to pick which items to confirm
@@ -145,6 +147,8 @@ class WardrobeViewModel @Inject constructor(
     fun showAddSheet() = _uiState.update { it.copy(showAddSheet = true) }
     fun hideAddSheet() = _uiState.update { it.copy(showAddSheet = false) }
 
+    fun setScanMode(mode: String) = _uiState.update { it.copy(scanMode = mode) }
+
     fun scanImage(imageFile: File) {
         android.util.Log.d(
             "VastraScan",
@@ -167,8 +171,9 @@ class WardrobeViewModel @Inject constructor(
                 )
                 return@launch
             }
+            val scanMode = _uiState.value.scanMode
             _uiState.update { it.copy(scanStatus = "Uploading to backend") }
-            when (val result = repo.scanItem(imageFile)) {
+            when (val result = repo.scanItem(imageFile, scanMode)) {
                 is ApiResult.Success -> {
                     val jobId = result.data.jobId
                     android.util.Log.d("VastraScan", "timing upload+accept: jobId=$jobId elapsed=${System.currentTimeMillis() - t0Total}ms")

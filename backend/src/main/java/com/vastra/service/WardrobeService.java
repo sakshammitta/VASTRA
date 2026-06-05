@@ -60,12 +60,12 @@ public class WardrobeService {
     }
 
     @Transactional
-    public String initiateItemScan(UUID userId, MultipartFile image) throws IOException {
+    public String initiateItemScan(UUID userId, MultipartFile image, String scanMode) throws IOException {
         long t0 = System.currentTimeMillis();
         String imageKey = r2Service.upload(image, "scans/" + userId);
         log.info("timing r2-upload: {}ms  key={}", System.currentTimeMillis() - t0, imageKey);
         String jobId = UUID.randomUUID().toString();
-        scanJobService.processScanAsync(jobId, userId, imageKey);
+        scanJobService.processScanAsync(jobId, userId, imageKey, scanMode);
         return jobId;
     }
 

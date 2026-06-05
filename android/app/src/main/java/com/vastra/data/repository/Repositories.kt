@@ -100,18 +100,19 @@ class WardrobeRepository @Inject constructor(private val api: VastraApiService) 
         if (r.isSuccessful) ApiResult.Success(r.body()!!) else ApiResult.Error(r.message(), r.code())
     } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
 
-    suspend fun scanItem(imageFile: File): ApiResult<ScanJobResponse> = try {
+    suspend fun scanItem(imageFile: File, scanMode: String = "single"): ApiResult<ScanJobResponse> = try {
         android.util.Log.d(
             "VastraScan",
             "scanItem → POST /api/wardrobe/scan  file=${imageFile.absolutePath} " +
-                "exists=${imageFile.exists()} size=${imageFile.length()}B"
+                "exists=${imageFile.exists()} size=${imageFile.length()}B scan_mode=$scanMode"
         )
         val part = MultipartBody.Part.createFormData(
             "image", imageFile.name,
             imageFile.asRequestBody("image/*".toMediaType())
         )
+        val modePart = scanMode.toRequestBody("text/plain".toMediaType())
         val t0 = System.currentTimeMillis()
-        val r = api.scanItem(part)
+        val r = api.scanItem(part, modePart)
         android.util.Log.d("VastraScan", "timing upload+accept: ${System.currentTimeMillis() - t0}ms  HTTP ${r.code()}")
         if (r.isSuccessful) ApiResult.Success(r.body()!!)
         else ApiResult.Error(httpError("scan", r.code(), r.errorBody()?.string(), r.message()), r.code())

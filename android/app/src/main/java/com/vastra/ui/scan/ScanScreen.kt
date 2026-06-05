@@ -104,10 +104,37 @@ fun ScanScreen(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Upload an outfit photo — we'll identify each piece in your look.",
+                    if (uiState.scanMode == "single")
+                        "Photo of one item — we'll focus on the main framed garment."
+                    else
+                        "Upload an outfit photo — we'll identify each piece in your look.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = VastraMutedText
                 )
+
+                Spacer(Modifier.height(12.dp))
+
+                // ── Scan mode toggle ────────────────────────────────────────
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = VastraCard,
+                    border = BorderStroke(1.dp, VastraBorderColor)
+                ) {
+                    Row(modifier = Modifier.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        ScanModeChip(
+                            label = "Single item",
+                            selected = uiState.scanMode == "single",
+                            onClick = { viewModel.setScanMode("single") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        ScanModeChip(
+                            label = "Full outfit",
+                            selected = uiState.scanMode == "outfit",
+                            onClick = { viewModel.setScanMode("outfit") },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
 
             // ── Large framed upload area ────────────────────────────────────
@@ -138,20 +165,22 @@ fun ScanScreen(
                         modifier = Modifier.size(44.dp),
                         tint = VastraMutedText
                     )
-                    // "FRAME ONE PIECE" indicator
                     Surface(
                         color = VastraSand,
                         shape = RoundedCornerShape(20.dp)
                     ) {
                         Text(
-                            "OUTFIT OR SINGLE ITEM",
+                            if (uiState.scanMode == "single") "SINGLE ITEM" else "FULL OUTFIT",
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                             style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.5.sp),
                             color = VastraMutedText
                         )
                     }
                     Text(
-                        "Works with full outfits, flat lays,\nor a single piece on its own",
+                        if (uiState.scanMode == "single")
+                            "Frame one garment — we'll keep\nonly the main centred piece"
+                        else
+                            "Works with full outfits, flat lays,\nor a single piece on its own",
                         style = MaterialTheme.typography.bodySmall,
                         color = VastraMutedText,
                         textAlign = TextAlign.Center
@@ -378,5 +407,25 @@ private fun QuickTip(icon: ImageVector, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Icon(icon, null, modifier = Modifier.size(16.dp), tint = VastraMutedText)
         Text(text, style = MaterialTheme.typography.bodySmall, color = VastraMutedText)
+    }
+}
+
+@Composable
+private fun ScanModeChip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        color = if (selected) VastraInk else Color.Transparent,
+        modifier = modifier
+    ) {
+        Text(
+            label,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp, horizontal = 4.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = if (selected) VastraCream else VastraMutedText,
+            textAlign = TextAlign.Center
+        )
     }
 }

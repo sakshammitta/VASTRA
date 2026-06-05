@@ -304,6 +304,54 @@ def detect_worn_outfit(image: Image.Image) -> list[Detection]:
         return []
 
 
+# Border proximity threshold: boxes whose edge is within this fraction of the
+# image boundary on ANY side are considered background/partial captures and
+# dropped by detect_single_item().
+_BORDER_MARGIN: float = float(os.getenv("SINGLE_ITEM_BORDER_MARGIN", "0.08"))
+
+
+def detect_single_item(image: Image.Image) -> list[Detection]:
+    """
+    Single-item wardrobe scan: run detect_worn_outfit() then keep only the one
+    dominant garment.
+
+    Filters applied after standard detection + NMS:
+      1. Border proximity: drop any box whose edge is within _BORDER_MARGIN of
+         the image boundary (likely background or partially-framed item).
+      2. Dominance: score each remaining box by area * centrality and keep only
+         the top-scoring one (returns at most 1 item).
+
+    Falls back to detect_worn_outfit() behaviour if model is not loaded.
+    """
+    candidates = detect_worn_outfit(image)
+    if len(candidates) <= 1:
+        return candidates
+
+    def _border_ok(d: Detection) -> bool:
+        b = d.bbox
+        return (b.x_min >= _BORDER_MARGIN and b.y_min >= _BORDER_MARGIN
+                and b.x_max <= 1.0 - _BORDER_MARGIN and b.y_max <= 1.0 - _BORDER_MARGIN)
+
+    def _dominance(d: Detection) -> float:
+        b = d.bbox
+        area = (b.x_max - b.x_min) * (b.y_max - b.y_min)
+        cx = (b.x_min + b.x_max) / 2.0
+        cy = (b.y_min + b.y_max) / 2.0
+        # Centrality: 1.0 at image centre, decreasing toward edges.
+        centrality = (1.0 - abs(cx - 0.5) * 2) * (1.0 - abs(cy - 0.5) * 2)
+        return area * centrality
+
+    interior = [d for d in candidates if _border_ok(d)]
+    pool = interior if interior else candidates  # fall back if all touch border
+    best = max(pool, key=_dominance)
+    logger.info(
+        f"single-item: {len(candidates)} worn-outfit → "
+        f"{len(interior)} interior → kept '{best.label}' "
+        f"area={(best.bbox.x_max - best.bbox.x_min)*(best.bbox.y_max - best.bbox.y_min):.3f}"
+    )
+    return [best]
+
+
 # ── Post-processing ───────────────────────────────────────────────────────────
 
 def _iou(a: Detection, b: Detection) -> float:

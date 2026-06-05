@@ -48,11 +48,12 @@ public class WardrobeController {
     @PostMapping("/scan")
     public ResponseEntity<Map<String, String>> scanItem(
             @RequestPart("image") MultipartFile image,
+            @RequestPart(value = "scan_mode", required = false) String scanMode,
             Authentication auth) throws IOException {
         UUID userId = (UUID) auth.getPrincipal();
-        log.info("POST /api/wardrobe/scan user={} filename={} size={}B contentType={}",
-                userId, image.getOriginalFilename(), image.getSize(), image.getContentType());
-        String jobId = wardrobeService.initiateItemScan(userId, image);
+        log.info("POST /api/wardrobe/scan user={} filename={} size={}B contentType={} scan_mode={}",
+                userId, image.getOriginalFilename(), image.getSize(), image.getContentType(), scanMode);
+        String jobId = wardrobeService.initiateItemScan(userId, image, scanMode);
         log.info("POST /api/wardrobe/scan accepted user={} jobId={}", userId, jobId);
         return ResponseEntity.ok(Map.of("jobId", jobId, "status", "QUEUED"));
     }

@@ -40,7 +40,7 @@ public class ScanJobService {
     }
 
     @Async
-    public void processScanAsync(String jobId, UUID userId, String r2ImageKey) {
+    public void processScanAsync(String jobId, UUID userId, String r2ImageKey, String scanMode) {
         String redisKey = JOB_PREFIX + jobId;
         Map<String, Object> job = new HashMap<>();
         job.put("jobId", jobId);
@@ -56,10 +56,11 @@ public class ScanJobService {
             redis.opsForValue().set(redisKey, job, TTL);
             long t0Job = System.currentTimeMillis();
 
+            String mode = (scanMode != null && !scanMode.isBlank()) ? scanMode : "outfit";
             // Single round-trip: /embed/full fetches the image from R2 once, runs
             // DINO + FashionCLIP, and returns classified items — no separate /scan call.
-            log.info("scan job {} → POST {}/embed/full image_key={}", jobId, cvServiceUrl, r2ImageKey);
-            var fullRequest = Map.of("image_key", r2ImageKey);
+            log.info("scan job {} → POST {}/embed/full image_key={} scan_mode={}", jobId, cvServiceUrl, r2ImageKey, mode);
+            var fullRequest = Map.of("image_key", r2ImageKey, "scan_mode", mode);
             var fullResponse = restTemplate.postForObject(
                 cvServiceUrl + "/embed/full", fullRequest, Map.class
             );
