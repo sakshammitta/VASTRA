@@ -39,12 +39,11 @@ _SUBTYPE_TO_CATEGORY: dict[str, ClothingCategory] = {
     "long sleeve": ClothingCategory.TOP,
     "jersey": ClothingCategory.TOP,
     "vest": ClothingCategory.TOP,
-    # Traditional / ethnic top
-    "kurta": ClothingCategory.TOP,
+    # Traditional / ethnic
+    "kurta": ClothingCategory.TRADITIONAL,
     "jacket": ClothingCategory.OUTERWEAR,
     "coat": ClothingCategory.OUTERWEAR,
     "blazer": ClothingCategory.OUTERWEAR,
-    "nehru jacket": ClothingCategory.OUTERWEAR,
     "jeans": ClothingCategory.BOTTOM,
     "trousers": ClothingCategory.BOTTOM,
     "shorts": ClothingCategory.BOTTOM,
@@ -52,10 +51,10 @@ _SUBTYPE_TO_CATEGORY: dict[str, ClothingCategory] = {
     "dress": ClothingCategory.DRESS,
     "jumpsuit": ClothingCategory.DRESS,
     # Traditional / ethnic full-length
-    "saree": ClothingCategory.DRESS,
-    "lehenga": ClothingCategory.DRESS,
-    "salwar kameez": ClothingCategory.DRESS,
-    "anarkali": ClothingCategory.DRESS,
+    "saree": ClothingCategory.TRADITIONAL,
+    "lehenga": ClothingCategory.TRADITIONAL,
+    "salwar kameez": ClothingCategory.TRADITIONAL,
+    "anarkali": ClothingCategory.TRADITIONAL,
     # Footwear
     "sneakers": ClothingCategory.FOOTWEAR,
     "shoes": ClothingCategory.FOOTWEAR,
@@ -74,8 +73,9 @@ _SUBTYPE_TO_CATEGORY: dict[str, ClothingCategory] = {
     "scarf": ClothingCategory.ACCESSORY,
     "belt": ClothingCategory.ACCESSORY,
     "suit": ClothingCategory.SUIT,
-    "sherwani": ClothingCategory.SUIT,
-    "kurta pajama": ClothingCategory.SUIT,
+    "sherwani": ClothingCategory.TRADITIONAL,
+    "kurta pajama": ClothingCategory.TRADITIONAL,
+    "nehru jacket": ClothingCategory.TRADITIONAL,
 }
 
 _SUBTYPES: list[str] = list(_SUBTYPE_TO_CATEGORY.keys())

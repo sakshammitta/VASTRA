@@ -57,7 +57,19 @@ public class ImageEnhancementService {
         "anthropologie.com", "freepeople.com", "revolve.com",
         "shopbop.com", "net-a-porter.com", "matchesfashion.com",
         "johnlewis.com", "marks-and-spencer.com", "marksandspencer.com",
-        "myntra.com", "ajio.com", "nykaa.com"
+        "myntra.com", "ajio.com", "nykaa.com",
+        // Indian traditional / ethnic clothing
+        "manyavar.com", "fabindia.com", "jaypore.com", "tasva.com",
+        "houseofpataudi.com", "utsavfashion.com", "cbazaar.com",
+        // Footwear-specific brand sites
+        "vans.com", "converse.com", "timberland.com", "skechers.com",
+        "salomon.com", "brooks.com", "hoka.com", "onrunning.com", "on-running.com",
+        "newbalance.com", "mizuno.com", "merrell.com", "columbia.com",
+        "clarks.com", "drmartens.com", "ugg.com",
+        "crocs.com", "birkenstock.com", "teva.com",
+        // Footwear retailers
+        "zappos.com", "dsw.com", "shoecarnival.com", "stevemadden.com",
+        "aldoshoes.com", "aldoshoes.co.uk", "schuh.co.uk", "office.co.uk"
     );
 
     private static final Set<String> ACCEPTABLE_DOMAINS = Set.of(
@@ -125,7 +137,7 @@ public class ImageEnhancementService {
         COLOR_RANGES.put("beige",  new int[][]{{180,240},{160,220},{120,190}});
     }
 
-    private static final int MIN_DIMENSION_PX = 200;
+    private static final int MIN_DIMENSION_PX = 150;
     private static final int WARDROBE_QUALITY_THRESHOLD = 500;
     private static final int MAX_WEB_CANDIDATES = 4;
 

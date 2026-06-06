@@ -20,31 +20,35 @@ object SubtypeVocabulary {
             "Tank Top", "Long Sleeve", "Jersey",
             "Sweater", "Sweatshirt", "Crewneck",
             "Hoodie", "Zip-up Hoodie",
-            "Vest",
-            "Kurta"
+            "Vest"
         ),
         ClothingCategory.OUTERWEAR to listOf(
-            "Jacket", "Coat", "Blazer", "Nehru Jacket", "Ethnic Jacket"
+            "Jacket", "Coat", "Blazer"
+        ),
+        ClothingCategory.TRADITIONAL to listOf(
+            "Kurta", "Kurta Pajama", "Sherwani",
+            "Nehru Jacket", "Ethnic Jacket",
+            "Saree", "Lehenga", "Salwar Kameez", "Anarkali",
+            "Dupatta"
         ),
         ClothingCategory.FOOTWEAR to listOf(
             "Sneakers", "Shoes", "Boots", "Sandals", "Slides",
             "Loafers", "Heels", "Formal Shoes", "Running Shoes", "Clogs"
         ),
         ClothingCategory.DRESS to listOf(
-            "Dress", "Jumpsuit",
-            "Saree", "Lehenga", "Salwar Kameez", "Anarkali"
+            "Dress", "Jumpsuit"
         ),
         ClothingCategory.BAG to listOf(
             "Bag", "Backpack", "Handbag"
         ),
         ClothingCategory.ACCESSORY to listOf(
-            "Hat", "Beanie", "Scarf", "Belt", "Dupatta"
+            "Hat", "Beanie", "Scarf", "Belt", "Watch", "Sunglasses"
         ),
         ClothingCategory.SUIT to listOf(
-            "Suit", "Kurta Pajama", "Sherwani"
+            "Suit"
         ),
         ClothingCategory.OTHER to listOf(
-            "Other Traditional / Ethnic"
+            "Other"
         )
     )
 

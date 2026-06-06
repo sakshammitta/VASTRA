@@ -9,5 +9,6 @@ public enum ClothingCategory {
     BAG,
     DRESS,
     SUIT,
+    TRADITIONAL,
     OTHER
 }

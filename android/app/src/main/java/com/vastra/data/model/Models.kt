@@ -63,7 +63,7 @@ enum class OwnershipStatus { OWNED, ASPIRATIONAL }
 enum class ClothingCategory(val label: String) {
     TOP("Top"), BOTTOM("Bottom"), OUTERWEAR("Outerwear"),
     FOOTWEAR("Footwear"), ACCESSORY("Accessory"), BAG("Bag"),
-    DRESS("Dress"), SUIT("Suit"), OTHER("Other")
+    DRESS("Dress"), SUIT("Suit"), TRADITIONAL("Traditional"), OTHER("Other")
 }
 
 data class Post(

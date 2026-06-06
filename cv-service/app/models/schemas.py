@@ -12,6 +12,7 @@ class ClothingCategory(str, Enum):
     BAG = "BAG"
     DRESS = "DRESS"
     SUIT = "SUIT"
+    TRADITIONAL = "TRADITIONAL"
     OTHER = "OTHER"
 
 

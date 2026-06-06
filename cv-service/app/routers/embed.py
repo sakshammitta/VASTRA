@@ -39,7 +39,7 @@ async def scan_and_embed(request: ScanAndEmbedRequest):
     except r2_module.R2DownloadError as e:
         # 404 only for genuinely-missing objects; 502/503 for auth/network/config
         # so the client message reflects the real cause instead of "not found".
-        status = 404 if e.kind == "not_found" else 502
+        status = 404 if e.kind == "not_found" else 422 if e.kind == "not_image" else 502
         logger.error(f"/embed/full r2-fetch failed kind={e.kind}: {e}")
         raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:
@@ -76,7 +76,7 @@ async def classify_whole_image(request: ScanAndEmbedRequest):
         image = _r2.download_image(request.image_key)
         logger.info(f"timing r2-fetch: {(time.perf_counter() - t0)*1000:.0f}ms  {image.width}x{image.height}")
     except r2_module.R2DownloadError as e:
-        status = 404 if e.kind == "not_found" else 502
+        status = 404 if e.kind == "not_found" else 422 if e.kind == "not_image" else 502
         logger.error(f"/embed/whole r2-fetch failed kind={e.kind}: {e}")
         raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:
@@ -156,7 +156,7 @@ async def embed_detections(request: EmbedRequest):
         image = _r2.download_image(request.image_key)
         logger.info(f"timing r2-fetch: {(time.perf_counter() - t0)*1000:.0f}ms  {image.width}x{image.height}")
     except r2_module.R2DownloadError as e:
-        status = 404 if e.kind == "not_found" else 502
+        status = 404 if e.kind == "not_found" else 422 if e.kind == "not_image" else 502
         logger.error(f"/embed r2-fetch failed kind={e.kind}: {e}")
         raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:

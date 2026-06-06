@@ -80,7 +80,47 @@ class R2Client:
             logger.error(f"R2 download failed (unexpected): bucket={self.bucket} key={key} err={e}")
             raise R2DownloadError("unknown", f"Unexpected R2 download error: {e}")
         buf.seek(0)
-        return Image.open(buf).convert("RGB")
+        raw = buf.read()
+        buf.seek(0)
+
+        # Inspect magic bytes to detect non-image responses (XML/HTML error pages, etc.)
+        magic = raw[:16] if len(raw) >= 16 else raw
+        is_jpeg = raw[:2] == b'\xff\xd8'
+        is_png  = raw[:8] == b'\x89PNG\r\n\x1a\n'
+        is_webp = raw[:4] == b'RIFF' and raw[8:12] == b'WEBP'
+        is_gif  = raw[:6] in (b'GIF87a', b'GIF89a')
+        is_image = is_jpeg or is_png or is_webp or is_gif
+
+        if not is_image:
+            # Likely an XML/HTML error page or unexpected response body
+            head_bytes = raw[:128]
+            head_text  = head_bytes.decode("utf-8", errors="replace")
+            hex_preview = magic.hex()
+            logger.error(
+                f"R2 key='{key}' returned {len(raw)} bytes that are NOT a recognised image. "
+                f"First 16 bytes (hex): {hex_preview} | text: {head_text!r}"
+            )
+            # Persist bad payload so it can be inspected in the container
+            try:
+                import tempfile, pathlib
+                tmp = pathlib.Path(tempfile.gettempdir()) / f"debug_failed_image_fetch_{key.replace('/', '_')}.bin"
+                tmp.write_bytes(raw)
+                logger.error(f"Bad R2 payload saved to {tmp}")
+            except Exception:
+                pass
+            raise R2DownloadError(
+                "not_image",
+                f"R2 key='{key}' returned {len(raw)} non-image bytes "
+                f"(first 16 hex: {hex_preview}). "
+                "Likely an expired presigned URL response, XML error page, or wrong content. "
+                f"Preview: {head_text[:200]!r}",
+            )
+
+        try:
+            return Image.open(buf).convert("RGB")
+        except Exception as exc:
+            logger.error(f"PIL could not decode R2 key='{key}': {exc}")
+            raise R2DownloadError("not_image", f"PIL decode failed for key='{key}': {exc}")
 
     def upload_image(self, image: Image.Image, folder: str = "cv-crops") -> str:
         key = f"{folder}/{uuid.uuid4()}.jpg"
