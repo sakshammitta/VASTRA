@@ -122,7 +122,9 @@ data class WebMatchCandidate(
     val title: String,
     val imageUrl: String,
     val sourceUrl: String,
-    val siteName: String?
+    val siteName: String?,
+    /** Non-null when the candidate's title mentions a different color than detected. */
+    val colorWarning: String? = null
 )
 
 /** Response from POST /scan/{jobId}/items/{idx}/web-match. */
@@ -135,7 +137,9 @@ data class WebMatchResponse(
 data class AiRenderResponse(
     val renderUrl: String?,
     val renderKey: String?,
-    val available: Boolean
+    val available: Boolean,
+    /** Human-readable reason for failure, null on success. */
+    val failureReason: String? = null
 )
 
 data class Comment(

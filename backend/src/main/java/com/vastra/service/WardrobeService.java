@@ -279,22 +279,25 @@ public class WardrobeService {
         String cropKey = item.getR2ImageKey();
         if (!imageEnhancementService.isAiRenderAvailable()) {
             log.info("ai-render unavailable for item {}: OPENAI_API_KEY not configured", itemId);
-            return new ClothingItemDto.AiRenderResponse(null, null, false);
+            return new ClothingItemDto.AiRenderResponse(null, null, false, null);
         }
         if (cropKey == null || cropKey.isBlank()) {
             log.warn("ai-render skipped for item {}: no crop reference stored (r2ImageKey is null)", itemId);
-            return new ClothingItemDto.AiRenderResponse(null, null, true);
+            return new ClothingItemDto.AiRenderResponse(null, null, true,
+                "No crop reference stored for this item. Try rescanning.");
         }
         String cropUrl  = r2Service.getPresignedUrl(cropKey);
         String category = override(req != null ? req.category() : null,
                 item.getCategory() != null ? item.getCategory().name() : "OTHER");
         String subCat   = override(req != null ? req.subCategory() : null, item.getSubCategory());
         String brand    = (req != null && req.brand() != null) ? req.brand() : item.getBrand();
-        String renderKey = imageEnhancementService.generateAiRender(
+        String[] result = imageEnhancementService.generateAiRenderWithReason(
                 cropUrl, category, subCat,
                 item.getColorPalette() != null ? item.getColorPalette() : List.of(), brand);
-        if (renderKey == null) return new ClothingItemDto.AiRenderResponse(null, null, true);
-        return new ClothingItemDto.AiRenderResponse(r2Service.getPresignedUrl(renderKey), renderKey, true);
+        String renderKey = result[0];
+        String failureReason = result[1];
+        if (renderKey == null) return new ClothingItemDto.AiRenderResponse(null, null, true, failureReason);
+        return new ClothingItemDto.AiRenderResponse(r2Service.getPresignedUrl(renderKey), renderKey, true, null);
     }
 
     /**

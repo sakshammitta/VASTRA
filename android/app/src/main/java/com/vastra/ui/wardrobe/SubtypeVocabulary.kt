@@ -16,7 +16,11 @@ object SubtypeVocabulary {
             "Cargo Pants", "Shorts", "Skirt", "Leggings"
         ),
         ClothingCategory.TOP to listOf(
-            "T-Shirt", "Shirt", "Polo Shirt", "Blouse", "Tank Top", "Sweater", "Hoodie"
+            "T-Shirt", "Shirt", "Button-up Shirt", "Polo Shirt", "Blouse",
+            "Tank Top", "Long Sleeve", "Jersey",
+            "Sweater", "Sweatshirt", "Crewneck",
+            "Hoodie", "Zip-up Hoodie",
+            "Vest"
         ),
         ClothingCategory.OUTERWEAR to listOf(
             "Jacket", "Coat", "Blazer"

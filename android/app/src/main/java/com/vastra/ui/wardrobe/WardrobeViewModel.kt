@@ -447,17 +447,18 @@ class WardrobeViewModel @Inject constructor(
                 is ApiResult.Success -> {
                     val r = result.data
                     if (!r.available || r.renderUrl == null || r.renderKey == null) {
-                        val reason = if (!r.available)
-                            "AI clean-image generation is not enabled yet. Configure OPENAI_API_KEY on the server."
-                        else
-                            "Couldn't generate a clean image"
-                        setImageState(index, ImageSourceState.DisplayImagePending(reason))
+                        val reason = when {
+                            !r.available -> "AI clean-image generation is not enabled yet. Configure OPENAI_API_KEY on the server."
+                            r.failureReason != null -> r.failureReason
+                            else -> "Couldn't generate a clean image. Try again."
+                        }
+                        setImageState(index, ImageSourceState.DisplayImagePending(reason, canRetry = r.available))
                     } else {
                         setImageState(index, ImageSourceState.AiRenderReadyForApproval(r.renderUrl, r.renderKey))
                     }
                 }
                 is ApiResult.Error ->
-                    setImageState(index, ImageSourceState.DisplayImagePending("Couldn't generate a clean image"))
+                    setImageState(index, ImageSourceState.DisplayImagePending("Couldn't reach the server. Check your connection and try again."))
             }
         }
     }
@@ -555,9 +556,11 @@ class WardrobeViewModel @Inject constructor(
                 is ApiResult.Success -> {
                     val r = result.data
                     if (!r.available || r.renderUrl == null || r.renderKey == null) {
-                        val reason = if (!r.available)
-                            "AI clean-image generation is not enabled yet. Configure OPENAI_API_KEY on the server to generate a clean wardrobe image."
-                        else "Couldn't generate a clean image — the AI service returned an error. Try again or find a product match instead."
+                        val reason = when {
+                            !r.available -> "AI clean-image generation is not enabled yet. Configure OPENAI_API_KEY on the server."
+                            r.failureReason != null -> r.failureReason
+                            else -> "Couldn't generate a clean image. Try again."
+                        }
                         setEnhanceState(ImageSourceState.DisplayImagePending(reason, canRetry = r.available))
                     } else {
                         setEnhanceState(ImageSourceState.AiRenderReadyForApproval(r.renderUrl, r.renderKey))

@@ -24,13 +24,21 @@ _models_loaded = False
 # FashionCLIP classifies each crop against THIS list (independent of the
 # Grounding-DINO phrase). Each subtype maps to a broad ClothingCategory.
 _SUBTYPE_TO_CATEGORY: dict[str, ClothingCategory] = {
-    "t-shirt": ClothingCategory.TOP,
-    "shirt": ClothingCategory.TOP,
+    # TOP — ordered from most-distinctive to least so zero-shot CLIP picks the right one.
+    "hoodie": ClothingCategory.TOP,
+    "zip-up hoodie": ClothingCategory.TOP,
+    "sweatshirt": ClothingCategory.TOP,
+    "crewneck": ClothingCategory.TOP,
+    "sweater": ClothingCategory.TOP,
     "polo shirt": ClothingCategory.TOP,
+    "button-up shirt": ClothingCategory.TOP,
+    "shirt": ClothingCategory.TOP,
+    "t-shirt": ClothingCategory.TOP,
     "blouse": ClothingCategory.TOP,
     "tank top": ClothingCategory.TOP,
-    "sweater": ClothingCategory.TOP,
-    "hoodie": ClothingCategory.TOP,
+    "long sleeve": ClothingCategory.TOP,
+    "jersey": ClothingCategory.TOP,
+    "vest": ClothingCategory.TOP,
     "jacket": ClothingCategory.OUTERWEAR,
     "coat": ClothingCategory.OUTERWEAR,
     "blazer": ClothingCategory.OUTERWEAR,
@@ -177,7 +185,12 @@ def _label_to_taxonomy(label: str) -> tuple[ClothingCategory, str]:
     # A few common DINO synonyms not spelled exactly like the taxonomy
     synonyms = {
         "top": ("t-shirt", ClothingCategory.TOP),
+        "sweatshirt": ("sweatshirt", ClothingCategory.TOP),
+        "crewneck": ("crewneck", ClothingCategory.TOP),
+        "pullover": ("sweatshirt", ClothingCategory.TOP),
+        "jumper": ("sweater", ClothingCategory.TOP),
         "pants": ("trousers", ClothingCategory.BOTTOM),
+        "jogger": ("joggers", ClothingCategory.BOTTOM),
         "footwear": ("shoes", ClothingCategory.FOOTWEAR),
         "handbag": ("bag", ClothingCategory.BAG),
         "purse": ("bag", ClothingCategory.BAG),

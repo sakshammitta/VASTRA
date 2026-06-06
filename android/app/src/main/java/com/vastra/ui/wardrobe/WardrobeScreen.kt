@@ -682,16 +682,40 @@ private fun ImageSourceSection(
 
                 is ImageSourceState.WebCandidatesAvailable -> {
                     val c = state.current
+                    var showPreview by remember(state.shownIndex) { mutableStateOf(false) }
+
+                    // Candidate row — tap image to open full preview.
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        AsyncImage(
-                            model = c.imageUrl,
-                            contentDescription = c.title,
-                            modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(VastraCard),
-                            contentScale = ContentScale.Crop
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(VastraCard)
+                                .clickable { showPreview = true }
+                        ) {
+                            AsyncImage(
+                                model = c.imageUrl,
+                                contentDescription = c.title,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                            // Expand hint overlay
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(2.dp)
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.55f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Outlined.ZoomIn, null,
+                                    modifier = Modifier.size(12.dp), tint = Color.White)
+                            }
+                        }
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
-                                c.title.take(48),
+                                c.title.take(56),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = VastraInk, maxLines = 2, overflow = TextOverflow.Ellipsis
                             )
@@ -699,11 +723,33 @@ private fun ImageSourceSection(
                                 Text(c.siteName, style = MaterialTheme.typography.labelSmall, color = VastraMutedText)
                             }
                             Text(
-                                "Is this your item? (${state.shownIndex + 1}/${state.candidates.size})",
+                                "Tap image to preview · ${state.shownIndex + 1} of ${state.candidates.size}",
                                 style = MaterialTheme.typography.labelSmall, color = VastraMutedText
                             )
                         }
                     }
+
+                    // Color mismatch warning banner.
+                    if (!c.colorWarning.isNullOrBlank()) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFFFFF3E0)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(8.dp),
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Filled.Info, null,
+                                    modifier = Modifier.size(14.dp).padding(top = 1.dp),
+                                    tint = Color(0xFFE65100))
+                                Text(c.colorWarning, style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF6D4C41))
+                            }
+                        }
+                    }
+
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = onConfirmWebMatch,
@@ -726,6 +772,19 @@ private fun ImageSourceSection(
                     ) {
                         Text("None of these — generate clean image",
                             style = MaterialTheme.typography.labelSmall, color = VastraInk)
+                    }
+
+                    // Full-size candidate preview dialog.
+                    if (showPreview) {
+                        WebCandidatePreviewSheet(
+                            candidate = c,
+                            candidateIndex = state.shownIndex,
+                            totalCandidates = state.candidates.size,
+                            onUseThis = { showPreview = false; onConfirmWebMatch() },
+                            onNext = if (state.hasMore) ({ showPreview = false; onShowNextWebCandidate() }) else null,
+                            onGenerateInstead = { showPreview = false; onRejectWebMatch() },
+                            onDismiss = { showPreview = false }
+                        )
                     }
                 }
 
@@ -812,6 +871,115 @@ private fun ImageSourceSection(
                         ) { Text("Try web match again", style = MaterialTheme.typography.labelSmall, color = VastraInk) }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Full-size candidate preview as a bottom sheet.
+ * Opens when the user taps the small candidate thumbnail — lets them verify
+ * details (logo, text, color) before deciding "Yes, use this."
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WebCandidatePreviewSheet(
+    candidate: com.vastra.data.model.WebMatchCandidate,
+    candidateIndex: Int,
+    totalCandidates: Int,
+    onUseThis: () -> Unit,
+    onNext: (() -> Unit)?,
+    onGenerateInstead: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = VastraCream) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Product match · ${candidateIndex + 1} of $totalCandidates",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = VastraMutedText
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, "Close", tint = VastraMutedText)
+                }
+            }
+
+            // Large product image
+            AsyncImage(
+                model = candidate.imageUrl,
+                contentDescription = candidate.title,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(VastraMuted),
+                contentScale = ContentScale.Fit
+            )
+
+            // Title + source
+            Text(candidate.title, style = MaterialTheme.typography.bodyMedium, color = VastraInk, maxLines = 3)
+            if (!candidate.siteName.isNullOrBlank()) {
+                Text(candidate.siteName, style = MaterialTheme.typography.bodySmall, color = VastraMutedText)
+            }
+
+            // Color warning banner if present
+            if (!candidate.colorWarning.isNullOrBlank()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFFFFF3E0)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Filled.Info, null,
+                            modifier = Modifier.size(16.dp).padding(top = 1.dp),
+                            tint = Color(0xFFE65100))
+                        Text(candidate.colorWarning, style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF6D4C41))
+                    }
+                }
+            }
+
+            // Action buttons
+            Button(
+                onClick = onUseThis,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = VastraInk)
+            ) {
+                Icon(Icons.Filled.CheckCircle, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Use this image", color = VastraCream, style = MaterialTheme.typography.labelLarge)
+            }
+
+            if (onNext != null) {
+                OutlinedButton(
+                    onClick = onNext,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, VastraBorderColor),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = VastraInk)
+                ) {
+                    Text("Next alternative", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+
+            TextButton(onClick = onGenerateInstead, modifier = Modifier.fillMaxWidth()) {
+                Text("Generate clean image instead", color = VastraInk)
             }
         }
     }

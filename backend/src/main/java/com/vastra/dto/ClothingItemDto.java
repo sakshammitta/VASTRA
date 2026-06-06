@@ -89,20 +89,22 @@ public class ClothingItemDto {
         String webMatchSourceUrl
     ) {}
 
-    /** One visual match candidate returned by the web-match endpoint. */
+    /** One visual product-match candidate returned by the web-match endpoint. */
     public record WebMatchCandidate(
         String title,
         String imageUrl,
         String sourceUrl,
-        String siteName
+        String siteName,
+        /** Non-null when the candidate's detected color differs from the item's palette. */
+        String colorWarning
     ) {}
 
     /**
      * Response from POST /scan/{jobId}/items/{idx}/web-match.
      * available=false  — SerpAPI key not configured.
-     * candidates empty — results were found but ALL scored ≤ 0 (resale/social/low
-     *                    quality only). The client should show "No clean product
-     *                    match found" and offer AI render instead.
+     * candidates empty — results were found but ALL scored below the wardrobe
+     *                    quality threshold. The client shows "No clean product
+     *                    match found" and offers AI render instead.
      */
     public record WebMatchResponse(
         List<WebMatchCandidate> candidates,
@@ -113,10 +115,13 @@ public class ClothingItemDto {
      * Response from POST /scan/{jobId}/items/{idx}/ai-render.
      * available=false means OpenAI is not configured in this environment.
      * renderUrl/renderKey are null on failure even when available=true.
+     * failureReason is a human-readable description of why generation failed,
+     * null on success.
      */
     public record AiRenderResponse(
         String renderUrl,
         String renderKey,
-        boolean available
+        boolean available,
+        String failureReason
     ) {}
 }

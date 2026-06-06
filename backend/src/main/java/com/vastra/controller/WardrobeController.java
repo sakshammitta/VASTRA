@@ -149,7 +149,7 @@ public class WardrobeController {
             @RequestBody(required = false) ClothingItemDto.EnhanceImageRequest req) {
 
         if (!imageEnhancementService.isAiRenderAvailable()) {
-            return ResponseEntity.ok(new ClothingItemDto.AiRenderResponse(null, null, false));
+            return ResponseEntity.ok(new ClothingItemDto.AiRenderResponse(null, null, false, null));
         }
 
         Map<String, Object> job = scanJobService.getJobStatus(jobId);
@@ -160,10 +160,8 @@ public class WardrobeController {
         if (itemIndex < 0 || itemIndex >= items.size()) return ResponseEntity.badRequest().build();
 
         Map<String, Object> detected = items.get(itemIndex);
-        // The crop is the visual-grounding input for the image-edit render.
         String cropKey    = (String) detected.get("crop_key");
         String cropUrl    = r2Service.getPresignedUrl(cropKey);
-        // Prefer the user-corrected identity (e.g. "joggers") over the CV guess.
         String category   = override(req != null ? req.category() : null,
                                      (String) detected.getOrDefault("category", "OTHER"));
         String subCat     = override(req != null ? req.subCategory() : null,
@@ -171,13 +169,15 @@ public class WardrobeController {
         String brand      = req != null ? req.brand() : null;
         List<String> colors = (List<String>) detected.getOrDefault("color_palette", List.of());
 
-        String renderKey = imageEnhancementService.generateAiRender(cropUrl, category, subCat, colors, brand);
+        String[] result = imageEnhancementService.generateAiRenderWithReason(cropUrl, category, subCat, colors, brand);
+        String renderKey = result[0];
+        String failureReason = result[1];
         if (renderKey == null) {
-            return ResponseEntity.ok(new ClothingItemDto.AiRenderResponse(null, null, true));
+            return ResponseEntity.ok(new ClothingItemDto.AiRenderResponse(null, null, true, failureReason));
         }
 
         String renderUrl = r2Service.getPresignedUrl(renderKey);
-        return ResponseEntity.ok(new ClothingItemDto.AiRenderResponse(renderUrl, renderKey, true));
+        return ResponseEntity.ok(new ClothingItemDto.AiRenderResponse(renderUrl, renderKey, true, null));
     }
 
     /**

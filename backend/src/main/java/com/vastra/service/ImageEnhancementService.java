@@ -11,27 +11,25 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.net.URI;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Produces clean e-commerce-quality wardrobe images via two strategies:
  *
  * 1. WEB_PRODUCT  — SerpAPI Google Lens reverse-image search on the crop;
- *                   applies domain allow/block filtering and quality scoring so
- *                   only clean brand/retailer product images are returned.
+ *                   applies domain allow/block filtering, color-mismatch
+ *                   detection, and type-strict scoring so only clean,
+ *                   correct-color, correct-type retailer product images appear.
  *                   Requires SERPAPI_KEY env var.
  *
  * 2. AI_RENDER    — OpenAI gpt-image-2 image-edit grounded in the crop.
+ *                   Returns a specific failureReason on error.
  *                   Requires OPENAI_API_KEY env var.
- *
- * Both services degrade gracefully when API keys are absent.
  *
  * PRIVACY (SerpAPI): searchWebMatches() receives ONLY the detected garment
  * crop presigned URL (item-crops/…), never the full source selfie (scans/…).
@@ -42,22 +40,18 @@ public class ImageEnhancementService {
     private static final Logger log = LoggerFactory.getLogger(ImageEnhancementService.class);
 
     // ── Domain quality tiers ─────────────────────────────────────────────────
-    // Tier 3 (best): official brand / club stores + top-tier fashion retailers.
+
     private static final Set<String> PREFERRED_DOMAINS = Set.of(
-        // Sportswear & athleisure brands (joggers / track pants live here)
         "nike.com", "adidas.com", "puma.com", "newbalance.com", "reebok.com",
         "underarmour.com", "champion.com", "lululemon.com", "gymshark.com",
         "asics.com", "fila.com", "kappa.com", "umbro.com",
-        // Football club / team stores
         "manutd.com", "store.manutd.com", "mancity.com", "arsenal.com",
         "chelseafc.com", "liverpoolfc.com", "tottenhamhotspur.com",
         "realmadrid.com", "fcbarcelona.com", "juventus.com",
         "fanatics.com", "fanatics.co.uk",
-        // Fashion brands
         "zara.com", "hm.com", "uniqlo.com", "gap.com", "levi.com", "levis.com",
         "ralphlauren.com", "tommyhilfiger.com", "calvinklein.com", "guess.com",
         "lacoste.com", "columbia.com", "patagonia.com", "arcteryx.com",
-        // Top-tier multi-brand retailers
         "asos.com", "nordstrom.com", "ssense.com", "farfetch.com",
         "mrporter.com", "endclothing.com", "urbanoutfitters.com",
         "anthropologie.com", "freepeople.com", "revolve.com",
@@ -66,11 +60,10 @@ public class ImageEnhancementService {
         "myntra.com", "ajio.com", "nykaa.com"
     );
 
-    // Tier 2: broader fashion / department retail — usually clean product images.
     private static final Set<String> ACCEPTABLE_DOMAINS = Set.of(
         "amazon.com", "amazon.co.uk", "amazon.in", "target.com", "walmart.com",
         "macys.com", "bloomingdales.com", "saks.com", "saksfifthavenue.com",
-        "google.com", "shopping.google.com",   // Google Shopping pass-through
+        "google.com", "shopping.google.com",
         "kohls.com", "jcrew.com", "bananarepublic.com", "oldnavy.com",
         "forever21.com", "primark.com", "bershka.com",
         "stradivarius.com", "mango.com", "next.co.uk", "boohoo.com",
@@ -82,40 +75,58 @@ public class ImageEnhancementService {
         "finishline.com", "prodirectsport.com", "kitbag.com"
     );
 
-    // Hard-blocked: resale / social / blog / noisy aggregators / dropship —
-    // never clean first-party product photography. Always excluded.
     private static final Set<String> BLOCKED_DOMAINS = Set.of(
-        // Resale / secondhand marketplaces
         "ebay.com", "ebay.co.uk", "ebay.ca", "ebay.com.au", "ebay.de",
         "poshmark.com", "depop.com", "mercari.com", "grailed.com",
         "vinted.com", "vinted.co.uk", "thredup.com", "therealreal.com",
         "tradesy.com", "vestiairecollective.com", "vestiaire.com",
-        // Social / blogs / image hosts
         "pinterest.com", "pinterest.co.uk", "reddit.com", "imgur.com",
         "tumblr.com", "instagram.com", "facebook.com", "tiktok.com",
         "twitter.com", "x.com", "youtube.com",
-        // Dropship / low-trust marketplaces
         "aliexpress.com", "alibaba.com", "dhgate.com", "wish.com", "temu.com",
         "shein.com", "lightinthebox.com", "banggood.com",
-        // Noisy football-kit aggregators / listing farms
         "footy.com", "footyheadlines.com", "footballshirtculture.com",
         "classicfootballshirts.com", "vintagefootballshirts.com",
         "kitbag-aggregator.com"
     );
 
-    // Minimum acceptable thumbnail width/height in pixels (SerpAPI provides
-    // original_dimensions for visual_matches; skip tiny/badly-cropped thumbs).
+    // Garment subtypes that must NOT be interchangeable when checking title.
+    // Each entry is a set of terms that a title MUST contain at least one of,
+    // given the confirmed subtype key. If the title contains terms from a
+    // COMPETING group (that maps to a different type), penalise heavily.
+    private static final Map<String, Set<String>> SUBTYPE_TITLE_REQUIRED = Map.of(
+        "hoodie",         Set.of("hoodie", "hooded", "pullover hoodie"),
+        "zip-up hoodie",  Set.of("zip", "full-zip", "half-zip", "hoodie"),
+        "sweatshirt",     Set.of("sweatshirt", "crew", "crewneck", "pullover"),
+        "sweater",        Set.of("sweater", "knitwear", "knit", "pullover", "jumper"),
+        "jacket",         Set.of("jacket"),
+        "track jacket",   Set.of("track jacket", "track top", "training jacket"),
+        "jersey",         Set.of("jersey", "kit", "shirt")
+    );
+
+    // Color names → typical hex ranges (checked against item's palette)
+    // Used to detect when a candidate title mentions a different color.
+    private static final Map<String, int[][]> COLOR_RANGES = new LinkedHashMap<>();
+    static {
+        // [R_min,R_max, G_min,G_max, B_min,B_max]
+        COLOR_RANGES.put("black",  new int[][]{{0,60},{0,60},{0,60}});
+        COLOR_RANGES.put("white",  new int[][]{{195,255},{195,255},{195,255}});
+        COLOR_RANGES.put("grey",   new int[][]{{60,195},{60,195},{60,195}});
+        COLOR_RANGES.put("gray",   new int[][]{{60,195},{60,195},{60,195}});
+        COLOR_RANGES.put("red",    new int[][]{{150,255},{0,80},{0,80}});
+        COLOR_RANGES.put("blue",   new int[][]{{0,80},{0,100},{130,255}});
+        COLOR_RANGES.put("navy",   new int[][]{{0,50},{0,60},{80,160}});
+        COLOR_RANGES.put("green",  new int[][]{{0,100},{100,220},{0,100}});
+        COLOR_RANGES.put("yellow", new int[][]{{180,255},{180,255},{0,80}});
+        COLOR_RANGES.put("orange", new int[][]{{180,255},{80,180},{0,60}});
+        COLOR_RANGES.put("pink",   new int[][]{{200,255},{100,200},{150,255}});
+        COLOR_RANGES.put("purple", new int[][]{{80,180},{0,80},{130,220}});
+        COLOR_RANGES.put("brown",  new int[][]{{100,180},{50,110},{0,70}});
+        COLOR_RANGES.put("beige",  new int[][]{{180,240},{160,220},{120,190}});
+    }
+
     private static final int MIN_DIMENSION_PX = 200;
-
-    // Wardrobe-display quality bar. A candidate must reach this score to be shown
-    // as a primary wardrobe-image choice. The lowest eligible domain tier
-    // (acceptable retailer) bases at 500, so this admits clean retailer/brand/
-    // official results and excludes everything below (blocked + unknown domains
-    // are already hard-rejected at Integer.MIN_VALUE in scoreCandidate()).
     private static final int WARDROBE_QUALITY_THRESHOLD = 500;
-
-    // Never show more than this many candidates — we surface a few clean choices,
-    // not a long mixed list. Often only 1–2 clear the quality bar, which is fine.
     private static final int MAX_WEB_CANDIDATES = 4;
 
     @Value("${vastra.serpapi.api-key:}")
@@ -139,16 +150,15 @@ public class ImageEnhancementService {
     public boolean isAiRenderAvailable() { return !openAiKey.isBlank(); }
 
     /**
-     * Run SerpAPI Google Lens on the crop and return up to 5 ranked clean
-     * product-image candidates. Applies three-tier domain scoring, dimension
-     * filtering, and a quality floor: if no candidate scores above zero the
-     * list is returned empty, which the client treats as "no clean match found
-     * — generate a clean image instead."
+     * Run SerpAPI Google Lens on the crop with a text context hint (subtype +
+     * brand + dominant color) to steer results, then apply domain-tier scoring,
+     * color-mismatch detection, and type-strict filtering.
      *
-     * Source strategy:
-     *   1. Lens "products" array  — shopping-context results, highest quality
-     *   2. Lens "visual_matches"  — general visual results, filtered+scored
-     * Both are merged, de-duplicated by domain, then sorted by score desc.
+     * Only wardrobe-quality candidates (same domain tier ≥ 500, correct type,
+     * no conflicting color in title) are returned. The list is never padded:
+     * if only one Fanatics result qualifies, exactly one is returned.
+     * If nothing clears the bar, returns empty → client shows "No clean product
+     * match found. Generate a clean wardrobe image instead."
      */
     public List<WebMatchCandidate> searchWebMatches(
             String cropPresignedUrl, String category, String subCategory,
@@ -157,158 +167,150 @@ public class ImageEnhancementService {
         if (serpApiKey.isBlank()) return List.of();
 
         try {
-            String body = restClient.get()
-                .uri("https://serpapi.com/search.json?engine=google_lens&url={url}&api_key={key}&hl=en",
-                    cropPresignedUrl, serpApiKey)
-                .retrieve()
-                .body(String.class);
-
-            JsonNode root = objectMapper.readTree(body);
-
-            // Scoring keywords: user-confirmed subtype + brand/identity tokens.
-            String subLower = subCategory == null ? "" : subCategory.toLowerCase();
+            // Text hint: confirmed subtype + brand + dominant color name.
+            // Google Lens accepts a `q` text context that steers ranking.
+            String textHint = buildTextHint(subCategory, brand, colorPalette);
+            String subLower  = subCategory == null ? "" : subCategory.toLowerCase().trim();
             List<String> brandTokens = brandTokens(brand);
+            List<String> detectedColorNames = colorNamesFromPalette(colorPalette);
+
+            String url = "https://serpapi.com/search.json?engine=google_lens"
+                + "&url=" + java.net.URLEncoder.encode(cropPresignedUrl, java.nio.charset.StandardCharsets.UTF_8)
+                + "&api_key=" + serpApiKey
+                + "&hl=en"
+                + (textHint.isBlank() ? "" : "&q=" + java.net.URLEncoder.encode(textHint, java.nio.charset.StandardCharsets.UTF_8));
+
+            String body = restClient.get().uri(url).retrieve().body(String.class);
+            JsonNode root = objectMapper.readTree(body);
 
             List<ScoredCandidate> pool = new ArrayList<>();
 
-            // ── 1. Products array (Google Lens shopping context) ───────────────
+            // Products array (shopping context — highest quality)
             JsonNode products = root.path("lens_results").path("products");
             if (!products.isArray()) products = root.path("products");
             if (products.isArray()) {
                 for (JsonNode p : products) {
-                    String title     = p.path("title").asText("");
-                    String imageUrl  = p.path("thumbnail").asText("");
+                    String title    = p.path("title").asText("");
+                    String imageUrl = p.path("thumbnail").asText("");
                     if (imageUrl.isBlank()) imageUrl = p.path("image").asText("");
                     String sourceUrl = p.path("link").asText("");
                     if (sourceUrl.isBlank()) sourceUrl = p.path("product_link").asText("");
-                    String siteName  = p.path("source").asText("");
+                    String siteName = p.path("source").asText("");
                     if (!imageUrl.isBlank() && !sourceUrl.isBlank()) {
                         int score = scoreCandidate(sourceUrl, title, subLower, brandTokens,
-                                p.path("original_dimensions"),
-                                /* fromProductsArray= */ true);
+                                p.path("original_dimensions"), true);
                         if (score > Integer.MIN_VALUE) {
+                            String colorWarn = colorWarning(title, detectedColorNames, subLower);
                             pool.add(new ScoredCandidate(title, imageUrl, sourceUrl,
-                                    siteName.isBlank() ? null : siteName, score));
+                                    siteName.isBlank() ? null : siteName, score, colorWarn));
                         }
                     }
                 }
             }
 
-            // ── 2. Visual matches array (general Lens results) ────────────────
+            // Visual matches array (general Lens results)
             JsonNode visual = root.path("visual_matches");
             if (visual.isArray()) {
                 for (JsonNode m : visual) {
-                    String title     = m.path("title").asText("");
-                    String imageUrl  = m.path("thumbnail").asText("");
+                    String title    = m.path("title").asText("");
+                    String imageUrl = m.path("thumbnail").asText("");
                     String sourceUrl = m.path("link").asText("");
-                    String siteName  = m.path("source").asText("");
+                    String siteName = m.path("source").asText("");
                     if (!imageUrl.isBlank() && !sourceUrl.isBlank()) {
                         int score = scoreCandidate(sourceUrl, title, subLower, brandTokens,
-                                m.path("original_dimensions"),
-                                /* fromProductsArray= */ false);
+                                m.path("original_dimensions"), false);
                         if (score > Integer.MIN_VALUE) {
+                            String colorWarn = colorWarning(title, detectedColorNames, subLower);
                             pool.add(new ScoredCandidate(title, imageUrl, sourceUrl,
-                                    siteName.isBlank() ? null : siteName, score));
+                                    siteName.isBlank() ? null : siteName, score, colorWarn));
                         }
                     }
                 }
             }
 
-            // Sort by score descending, de-duplicate by eTLD+1.
-            // Only candidates scoring at or above WARDROBE_QUALITY_THRESHOLD are
-            // shown — i.e. a recognised clean retailer/brand/official domain that
-            // passed the dimension filter. We do NOT pad the list to a fixed size:
-            // if only one candidate (e.g. a clean Fanatics product) qualifies, we
-            // return just that one rather than backfilling with weaker matches.
-            pool.sort(Comparator.comparingInt(ScoredCandidate::score).reversed());
+            // Sort: candidates with no color warning first, then by score.
+            pool.sort(Comparator
+                .<ScoredCandidate, Boolean>comparing(c -> c.colorWarning() != null)
+                .thenComparingInt(ScoredCandidate::score).reversed());
+
             List<WebMatchCandidate> results = new ArrayList<>();
-            Set<String> seenDomains = new java.util.HashSet<>();
+            Set<String> seenDomains = new HashSet<>();
             for (ScoredCandidate sc : pool) {
                 if (results.size() >= MAX_WEB_CANDIDATES) break;
-                if (sc.score() < WARDROBE_QUALITY_THRESHOLD) break;  // pool is sorted; rest are weaker
+                if (sc.score() < WARDROBE_QUALITY_THRESHOLD) break;
                 String domain = rootDomain(sc.sourceUrl());
-                if (!seenDomains.add(domain)) continue;  // one result per domain
-                results.add(new WebMatchCandidate(sc.title(), sc.imageUrl(), sc.sourceUrl(), sc.siteName()));
+                if (!seenDomains.add(domain)) continue;
+                results.add(new WebMatchCandidate(
+                    sc.title(), sc.imageUrl(), sc.sourceUrl(), sc.siteName(), sc.colorWarning()));
             }
 
-            // If nothing cleared the wardrobe-display quality bar, return empty —
-            // the client shows "No clean product match found. Generate a clean
-            // wardrobe image instead." rather than surfacing messy resale photos.
             if (results.isEmpty()) {
-                log.info("web-match: no wardrobe-quality candidates for {}/{} (pool={}, top-score={} < {} — suggest AI render)",
-                        category, subCategory, pool.size(),
-                        pool.isEmpty() ? "none" : pool.get(0).score(), WARDROBE_QUALITY_THRESHOLD);
+                log.info("web-match: no wardrobe-quality candidates for {}/{} (pool={}, textHint='{}' — suggest AI render)",
+                        category, subCategory, pool.size(), textHint);
                 return List.of();
             }
 
-            log.info("web-match: {} wardrobe-quality candidates for {}/{} (pool={}, top-score={})",
-                    results.size(), category, subCategory, pool.size(), pool.get(0).score());
+            log.info("web-match: {} candidates for {}/{} (pool={}, textHint='{}')",
+                    results.size(), category, subCategory, pool.size(), textHint);
             return results;
 
         } catch (Exception e) {
-            log.warn("web-match search failed ({}): {}", category, e.getMessage());
+            log.warn("web-match search failed ({}/{}): {}", category, subCategory, e.getMessage());
             return List.of();
         }
     }
 
     /**
-     * Score a single candidate. Returns {@code Integer.MIN_VALUE} to signal a
-     * HARD REJECT, which happens for any of:
-     *   - blocked domain (resale / social / aggregator / dropship)
-     *   - thumbnail below the minimum dimension
-     *   - UNKNOWN domain that is neither preferred nor acceptable nor a detected
-     *     official brand site. (This is the key fix: title/brand keyword bonuses
-     *     can NO LONGER lift an unknown aggregator like footy.com above the floor.
-     *     Only a recognised clean retailer/brand domain is ever eligible.)
+     * Score a single candidate. Returns Integer.MIN_VALUE for hard rejection:
+     *   - blocked domain (resale/social/aggregator)
+     *   - thumbnail below MIN_DIMENSION_PX
+     *   - unknown domain (not in preferred, acceptable, or brand-owned tiers)
+     *   - title type conflicts with confirmed subtype (e.g. "zip-up" for "hoodie",
+     *     "tracksuit" for "sweatshirt")
      *
-     * Eligible candidates score with the DOMAIN TIER dominant, so ranking is
-     * always brand/retailer-first; small title/brand bonuses only re-order
-     * within a tier:
-     *
-     *  1000  official brand site (domain contains the detected brand token)
-     *   900  preferred brand / club store / top retailer domain
-     *   500  acceptable fashion / department retailer domain
-     *  + 50  from the Lens "products" (shopping-context) array
-     *  + 10  confirmed subtype (e.g. "joggers") appears in the title
-     *  + 10  a brand/identity token (e.g. "adidas", "manchester") in the title
+     * Eligible scores: 1000 (brand-owned) / 900 (preferred) / 500 (acceptable)
+     * + bonuses: +50 from products array, +15 subtype in title, +10 brand in title.
      */
     private int scoreCandidate(String sourceUrl, String title,
                                String subLower, List<String> brandTokens,
                                JsonNode dims, boolean fromProductsArray) {
         String host = rootDomain(sourceUrl);
 
-        // 1. Hard block resale / social / aggregator / dropship sites.
         if (isBlocked(host)) {
-            log.debug("web-match: blocked domain {} — rejecting", host);
+            log.debug("web-match: blocked {}", host);
             return Integer.MIN_VALUE;
         }
 
-        // 2. Dimension filter: skip thumbnails too small to be clean product shots.
         if (dims != null && !dims.isMissingNode()) {
             int w = dims.path("width").asInt(0);
             int h = dims.path("height").asInt(0);
             if ((w > 0 && w < MIN_DIMENSION_PX) || (h > 0 && h < MIN_DIMENSION_PX)) {
-                log.debug("web-match: thumbnail too small ({}x{}) — rejecting {}", w, h, host);
+                log.debug("web-match: thumbnail too small ({}x{}) — {}", w, h, host);
                 return Integer.MIN_VALUE;
             }
         }
 
-        // 3. Domain tier — UNKNOWN domains are rejected outright.
         boolean brandSite = isBrandOwnedDomain(host, brandTokens);
         int base;
-        if (brandSite)            base = 1000;
+        if (brandSite)             base = 1000;
         else if (isPreferred(host)) base = 900;
         else if (isAcceptable(host)) base = 500;
         else {
-            log.debug("web-match: unrecognised domain {} — rejecting (not a clean retailer)", host);
+            log.debug("web-match: unknown domain {} — rejected", host);
             return Integer.MIN_VALUE;
         }
 
-        // 4. Minor re-ranking bonuses within the tier.
+        // Type conflict: if the title clearly indicates a different garment type,
+        // hard-reject (saves the user from seeing a zip-up hoodie when item is a plain hoodie).
+        if (!subLower.isBlank() && titleConflictsWithSubtype(title.toLowerCase(), subLower)) {
+            log.debug("web-match: type conflict for subtype='{}' title='{}' — rejected", subLower, title);
+            return Integer.MIN_VALUE;
+        }
+
         int score = base;
         if (fromProductsArray) score += 50;
         String titleLower = title.toLowerCase();
-        if (!subLower.isBlank() && titleLower.contains(subLower)) score += 10;
+        if (!subLower.isBlank() && titleLower.contains(subLower)) score += 15;
         for (String t : brandTokens) {
             if (t.length() >= 3 && titleLower.contains(t)) { score += 10; break; }
         }
@@ -316,13 +318,106 @@ public class ImageEnhancementService {
     }
 
     /**
-     * True when the host looks like the official store for a detected brand —
-     * e.g. brand token "adidas" → adidas.com, "manchester"/"united" → manutd.com
-     * is handled by the preferred list, but a generic brand site not in the list
-     * is still recognised here by token-in-host match.
+     * Returns true when the title contains terms that contradict the confirmed
+     * subtype — e.g. "zip-up" or "full-zip" for a plain "hoodie", or "tracksuit"
+     * for a "sweatshirt". Prevents wrong-type candidates appearing in results.
      */
+    private boolean titleConflictsWithSubtype(String titleLower, String subLower) {
+        // For hoodie: reject titles with "zip" unless subtype itself is zip-up hoodie
+        if ("hoodie".equals(subLower)) {
+            if (titleLower.contains("full-zip") || titleLower.contains("half-zip")
+                || (titleLower.contains("zip") && !titleLower.contains("hoodie"))) return true;
+            if (titleLower.contains("tracksuit") || titleLower.contains("track suit")) return true;
+        }
+        // For sweatshirt/crewneck: reject hooded and zip-up mentions
+        if ("sweatshirt".equals(subLower) || "crewneck".equals(subLower)) {
+            if (titleLower.contains("hooded") || titleLower.contains("hoodie")) return true;
+            if (titleLower.contains("zip-up") || titleLower.contains("full-zip")) return true;
+        }
+        // For sweater/jumper: reject sweatshirt and hoodie
+        if ("sweater".equals(subLower)) {
+            if (titleLower.contains("sweatshirt") || titleLower.contains("hoodie")) return true;
+        }
+        // For plain "jacket": reject "track jacket" confusion with sweater/hoodie
+        if ("jacket".equals(subLower)) {
+            if (titleLower.contains("hoodie") || titleLower.contains("sweatshirt")) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns a color-mismatch warning string when the title clearly mentions a
+     * color that conflicts with the item's detected dominant color, or null when
+     * colors are consistent or unknown. Used to flag candidates for display
+     * ("Note: this shows a red version — your item has a white logo").
+     */
+    private String colorWarning(String title, List<String> detectedColorNames, String subLower) {
+        if (detectedColorNames.isEmpty()) return null;
+        String titleLower = title.toLowerCase();
+        for (Map.Entry<String, int[][]> e : COLOR_RANGES.entrySet()) {
+            String colorName = e.getKey();
+            if (titleLower.contains(colorName)) {
+                // Title explicitly names a color — check if it matches detected palette.
+                boolean matchesDetected = detectedColorNames.stream()
+                    .anyMatch(d -> d.equals(colorName) || relatedColors(d, colorName));
+                if (!matchesDetected) {
+                    return "Note: this image shows a " + colorName + " version — verify it matches your item.";
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Some colors are close enough that a mismatch warning is unnecessary. */
+    private boolean relatedColors(String a, String b) {
+        return (("grey".equals(a) || "gray".equals(a)) && ("grey".equals(b) || "gray".equals(b)))
+            || (("navy".equals(a) && "blue".equals(b)) || ("blue".equals(a) && "navy".equals(b)));
+    }
+
+    /** Build a short text hint for the SerpAPI `q` parameter. */
+    private String buildTextHint(String subCategory, String brand, List<String> colorPalette) {
+        List<String> parts = new ArrayList<>();
+        if (brand != null && !brand.isBlank()) parts.add(brand.trim());
+        if (subCategory != null && !subCategory.isBlank()) parts.add(subCategory.trim());
+        // Add the dominant color name if clearly identifiable.
+        List<String> colorNames = colorNamesFromPalette(colorPalette);
+        if (!colorNames.isEmpty()) parts.add(colorNames.get(0));
+        return String.join(" ", parts);
+    }
+
+    /**
+     * Convert hex color palette to human color names using the COLOR_RANGES table.
+     * Returns names for the top colors (palette is already ordered by dominance).
+     */
+    private List<String> colorNamesFromPalette(List<String> hexPalette) {
+        List<String> names = new ArrayList<>();
+        for (String hex : hexPalette) {
+            String name = hexToColorName(hex);
+            if (name != null && !names.contains(name)) names.add(name);
+            if (names.size() >= 3) break;
+        }
+        return names;
+    }
+
+    private String hexToColorName(String hex) {
+        try {
+            String h = hex.startsWith("#") ? hex.substring(1) : hex;
+            int r = Integer.parseInt(h.substring(0, 2), 16);
+            int g = Integer.parseInt(h.substring(2, 4), 16);
+            int b = Integer.parseInt(h.substring(4, 6), 16);
+            for (Map.Entry<String, int[][]> e : COLOR_RANGES.entrySet()) {
+                int[][] ranges = e.getValue();
+                if (r >= ranges[0][0] && r <= ranges[0][1]
+                 && g >= ranges[1][0] && g <= ranges[1][1]
+                 && b >= ranges[2][0] && b <= ranges[2][1]) {
+                    return e.getKey();
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     private boolean isBrandOwnedDomain(String host, List<String> brandTokens) {
-        // Strip the TLD so "adidas" matches "adidas.com" but not random paths.
         int dot = host.indexOf('.');
         String label = dot > 0 ? host.substring(0, dot) : host;
         for (String t : brandTokens) {
@@ -331,11 +426,6 @@ public class ImageEnhancementService {
         return false;
     }
 
-    /**
-     * Split a brand/identity string into lowercase alphanumeric tokens of length
-     * ≥ 3, used both for title relevance and official-domain detection.
-     * e.g. "Adidas Manchester United" → ["adidas", "manchester", "united"].
-     */
     private static List<String> brandTokens(String brand) {
         if (brand == null || brand.isBlank()) return List.of();
         List<String> tokens = new ArrayList<>();
@@ -345,65 +435,61 @@ public class ImageEnhancementService {
         return tokens;
     }
 
-    /** Extract registrable domain (e.g. "ebay.com") from a URL for blocklist checks. */
     private static String rootDomain(String url) {
         try {
             String host = URI.create(url).getHost();
             if (host == null) return url.toLowerCase();
             host = host.toLowerCase();
             if (host.startsWith("www.")) host = host.substring(4);
-            // Keep only last two labels (e.g. ebay.co.uk → ebay.co.uk is intentional)
             return host;
         } catch (Exception e) {
             return url.toLowerCase();
         }
     }
 
-    private boolean isBlocked(String host) {
-        return BLOCKED_DOMAINS.stream().anyMatch(host::endsWith);
-    }
+    private boolean isBlocked(String host)    { return BLOCKED_DOMAINS.stream().anyMatch(host::endsWith); }
+    private boolean isPreferred(String host)  { return PREFERRED_DOMAINS.stream().anyMatch(host::endsWith); }
+    private boolean isAcceptable(String host) { return ACCEPTABLE_DOMAINS.stream().anyMatch(host::endsWith); }
 
-    private boolean isPreferred(String host) {
-        return PREFERRED_DOMAINS.stream().anyMatch(host::endsWith);
-    }
-
-    private boolean isAcceptable(String host) {
-        return ACCEPTABLE_DOMAINS.stream().anyMatch(host::endsWith);
-    }
-
-    /** Internal scored tuple used during ranking, discarded before returning. */
     private record ScoredCandidate(
-        String title, String imageUrl, String sourceUrl, String siteName, int score) {}
+        String title, String imageUrl, String sourceUrl,
+        String siteName, int score, String colorWarning) {}
+
+    // ── AI Render ─────────────────────────────────────────────────────────────
 
     /**
-     * Generate a clean fashion product image, VISUALLY GROUNDED in the detected
-     * garment crop. Uses the OpenAI images/EDITS endpoint: the internal crop is
-     * sent as the image input so the render preserves the actual color / type /
-     * silhouette / visible brand graphic of the item the user owns.
-     *
-     * @param cropPresignedUrl short-lived R2 URL of the detected garment crop
-     *                         (item-crops/…), used only as the edit reference.
-     * Uploads the result to R2 and returns the R2 key, or null on failure.
+     * Generate a clean fashion product image grounded in the crop.
+     * Returns the R2 key on success, or null on failure.
+     * Logs a specific failure reason (model rejection, quota, bad image, etc.).
      */
     public String generateAiRender(
             String cropPresignedUrl, String category, String subCategory,
             List<String> colorPalette, String brand) {
+        return generateAiRenderWithReason(cropPresignedUrl, category, subCategory, colorPalette, brand)[0];
+    }
 
-        if (openAiKey.isBlank()) return null;
+    /**
+     * Like generateAiRender() but returns [key_or_null, failureReason_or_null].
+     */
+    public String[] generateAiRenderWithReason(
+            String cropPresignedUrl, String category, String subCategory,
+            List<String> colorPalette, String brand) {
+
+        if (openAiKey.isBlank()) return new String[]{null, null};
 
         String colorDesc = colorPalette.isEmpty() ? ""
             : " in " + String.join(", ", colorPalette.subList(0, Math.min(2, colorPalette.size())));
         String brandDesc = (brand != null && !brand.isBlank()) ? brand + " " : "";
-        String garment   = subCategory.isBlank() ? category.toLowerCase() : subCategory;
-        String prompt    = String.format(
+        String garment   = (subCategory == null || subCategory.isBlank())
+            ? category.toLowerCase() : subCategory;
+        String prompt = String.format(
             "Turn this into a realistic fashion e-commerce product photograph of the same " +
             "%s%s%s shown in the reference image. Keep the exact color, type, silhouette and " +
             "any visible logo or graphic faithful to the reference. Present the garment upright, " +
             "centered, isolated on a clean opaque neutral background. Remove any person, body " +
             "parts, hands, arms, phone, and background scene. Professional product shot, " +
             "Zara / H&M / ASOS online store style. High quality.",
-            brandDesc, garment, colorDesc
-        );
+            brandDesc, garment, colorDesc);
 
         try {
             byte[] cropBytes = restClient.get()
@@ -411,8 +497,9 @@ public class ImageEnhancementService {
                 .retrieve()
                 .body(byte[].class);
             if (cropBytes == null || cropBytes.length == 0) {
-                log.warn("ai-render: crop download empty, cannot ground render");
-                return null;
+                String reason = "Crop image could not be downloaded (URL may have expired).";
+                log.warn("ai-render: {}", reason);
+                return new String[]{null, reason};
             }
 
             MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
@@ -438,18 +525,65 @@ public class ImageEnhancementService {
             byte[] imgBytes = Base64.getDecoder().decode(b64);
 
             String r2Key = r2Service.uploadBytes(imgBytes, "wardrobe-renders", "image/png");
-            log.info("ai-render (edit, model={}): {} bytes → R2 key={}", openAiImageModel, imgBytes.length, r2Key);
-            return r2Key;
+            log.info("ai-render (model={}): {} bytes → R2 key={}", openAiImageModel, imgBytes.length, r2Key);
+            return new String[]{r2Key, null};
+
+        } catch (HttpClientErrorException e) {
+            String reason = classifyOpenAiClientError(e);
+            log.error("ai-render OpenAI client error [{}/{}]: {} — {}", category, subCategory, e.getStatusCode(), reason);
+            return new String[]{null, reason};
+        } catch (HttpServerErrorException e) {
+            String reason = "OpenAI server error (" + e.getStatusCode() + "). Try again in a moment.";
+            log.error("ai-render OpenAI server error [{}/{}]: {}", category, subCategory, e.getMessage());
+            return new String[]{null, reason};
         } catch (Exception e) {
-            log.error("ai-render failed for {}/{} (model={}): {}", category, subCategory, openAiImageModel, e.getMessage());
-            return null;
+            String reason = classifyGenericError(e);
+            log.error("ai-render failed [{}/{}]: {}", category, subCategory, e.getMessage());
+            return new String[]{null, reason};
+        }
+    }
+
+    private String classifyOpenAiClientError(HttpClientErrorException e) {
+        int code = e.getStatusCode().value();
+        String body = e.getResponseBodyAsString();
+        if (code == 401) return "OpenAI authentication failed. Check OPENAI_API_KEY.";
+        if (code == 429) return "OpenAI rate limit or billing quota reached. Please try again later.";
+        if (code == 400) {
+            if (body.contains("invalid_image") || body.contains("could not process image"))
+                return "The crop image could not be processed by OpenAI (invalid format or too small).";
+            if (body.contains("content_policy") || body.contains("safety"))
+                return "Image generation was declined by OpenAI's content policy for this item.";
+            return "OpenAI rejected the request: " + summarizeBody(body);
+        }
+        return "OpenAI error " + code + ": " + summarizeBody(body);
+    }
+
+    private String classifyGenericError(Exception e) {
+        String msg = e.getMessage();
+        if (msg == null) return "Unknown error generating clean image.";
+        if (msg.contains("timeout") || msg.contains("SocketTimeout"))
+            return "Request timed out generating clean image. Try again.";
+        if (msg.contains("Connection refused") || msg.contains("UnknownHost"))
+            return "Could not reach OpenAI (network error). Check server connectivity.";
+        if (msg.contains("R2") || msg.contains("upload"))
+            return "Clean image was generated but could not be saved to storage.";
+        return "Failed to generate clean image: " + msg.substring(0, Math.min(msg.length(), 80));
+    }
+
+    private String summarizeBody(String body) {
+        if (body == null || body.isBlank()) return "(no detail)";
+        try {
+            JsonNode n = objectMapper.readTree(body);
+            String msg = n.path("error").path("message").asText("");
+            return msg.isBlank() ? body.substring(0, Math.min(body.length(), 80)) : msg;
+        } catch (Exception ignored) {
+            return body.substring(0, Math.min(body.length(), 80));
         }
     }
 
     /**
      * Download an external image URL and store it in R2.
-     * Used when confirming a web-match candidate so the display image is under
-     * VASTRA's control and won't expire. Returns the R2 key, or null on failure.
+     * Used when confirming a web-match candidate.
      */
     public String downloadAndStoreWebMatchImage(String externalImageUrl) {
         try {
