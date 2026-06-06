@@ -48,7 +48,7 @@ public class WardrobeController {
     @PostMapping("/scan")
     public ResponseEntity<Map<String, String>> scanItem(
             @RequestPart("image") MultipartFile image,
-            @RequestPart(value = "scan_mode", required = false) String scanMode,
+            @RequestParam(value = "scan_mode", required = false) String scanMode,
             Authentication auth) throws IOException {
         UUID userId = (UUID) auth.getPrincipal();
         log.info("POST /api/wardrobe/scan user={} filename={} size={}B contentType={} scan_mode={}",
