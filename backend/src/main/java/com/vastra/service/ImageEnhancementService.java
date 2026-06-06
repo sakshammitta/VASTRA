@@ -64,7 +64,7 @@ public class ImageEnhancementService {
         // Footwear-specific brand sites
         "vans.com", "converse.com", "timberland.com", "skechers.com",
         "salomon.com", "brooks.com", "hoka.com", "onrunning.com", "on-running.com",
-        "newbalance.com", "mizuno.com", "merrell.com", "columbia.com",
+        "mizuno.com", "merrell.com",
         "clarks.com", "drmartens.com", "ugg.com",
         "crocs.com", "birkenstock.com", "teva.com",
         // Footwear retailers
