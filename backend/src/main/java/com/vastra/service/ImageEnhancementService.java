@@ -17,6 +17,7 @@ import org.springframework.web.client.RestClient;
 
 import java.net.URI;
 import java.util.*;
+import java.util.Locale;
 
 /**
  * Produces clean e-commerce-quality wardrobe images via two strategies:
@@ -304,8 +305,14 @@ public class ImageEnhancementService {
                         }
                         log.debug("web-match: visual pass sim={} title='{}'",
                                 String.format("%.3f", sim), sc.title());
+                    } else if (requiresVisualGate(subCategory)) {
+                        // For distinctive item types, embedding failure is not acceptable —
+                        // a random matching-color jacket image is worse than no result at all.
+                        visualRejects++;
+                        log.debug("web-match: visual reject (embed-failed, gate required) title='{}'", sc.title());
+                        continue;
                     }
-                    // candEmb == null → CV couldn't embed it; fall through (don't fabricate).
+                    // Generic items (t-shirt, jeans, etc.) fall through when candEmb==null.
                 }
 
                 // Strengthen the color check on the shortlist by inspecting the actual
@@ -659,6 +666,24 @@ public class ImageEnhancementService {
     }
 
     /**
+     * Returns true for item subtypes where a visual embedding failure should cause
+     * candidate rejection rather than fall-through. These are high-variance categories
+     * where color+type filtering alone cannot distinguish "my jacket" from "a jacket".
+     */
+    private static boolean requiresVisualGate(String subCategory) {
+        if (subCategory == null) return false;
+        String s = subCategory.toLowerCase(Locale.ROOT);
+        return s.contains("jacket") || s.contains("coat") || s.contains("blazer")
+            || s.contains("hoodie") || s.contains("zip-up") || s.contains("sweatshirt")
+            || s.contains("sneaker") || s.contains("running shoe") || s.contains("trainer")
+            || s.contains("boot") || s.contains("loafer") || s.contains("heel")
+            || s.contains("formal shoe") || s.contains("oxford") || s.contains("derby")
+            || s.contains("kurta") || s.contains("sherwani") || s.contains("nehru")
+            || s.contains("saree") || s.contains("lehenga") || s.contains("salwar")
+            || s.contains("anarkali");
+    }
+
+    /**
      * Embed a candidate product image via the CV service's /embed/url endpoint.
      * Returns the normalized FashionCLIP vector, or null when the CV service is
      * unreachable, FashionCLIP is not loaded, or the image can't be fetched —
@@ -669,7 +694,7 @@ public class ImageEnhancementService {
             String reqBody = objectMapper.writeValueAsString(Map.of("image_url", imageUrl));
             String body = restClient.post()
                 .uri(cvServiceUrl + "/embed/url")
-                .header("Content-Type", "application/json")
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(reqBody)
                 .retrieve()
                 .body(String.class);

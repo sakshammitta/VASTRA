@@ -193,7 +193,11 @@ def embed_url(request: EmbedUrlRequest):
     """
     import io
     import urllib.request
+    import urllib.error
     from PIL import Image as PilImage
+
+    url = request.image_url
+    logger.info(f"/embed/url: fetching {url[:120]}")
 
     if not embedder.is_loaded():
         logger.info("/embed/url: FashionCLIP not loaded — returning null embedding")
@@ -202,18 +206,54 @@ def embed_url(request: EmbedUrlRequest):
     try:
         t0 = time.perf_counter()
         req = urllib.request.Request(
-            request.image_url,
-            headers={"User-Agent": "Mozilla/5.0 (VASTRA web-match validator)"},
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+            },
         )
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            content_type = resp.headers.get("Content-Type", "")
+            content_length = resp.headers.get("Content-Length", "?")
             raw = resp.read()
-        image = PilImage.open(io.BytesIO(raw)).convert("RGB")
+
+        magic = raw[:16].hex() if len(raw) >= 4 else "short"
+        logger.info(
+            f"/embed/url: fetched bytes={len(raw)} content-type={content_type!r} "
+            f"content-length={content_length} magic={magic} url={url[:80]}"
+        )
+
+        # Reject HTML/JSON bodies (e.g. login wall, CDN error page)
+        ct_lower = content_type.lower()
+        if "html" in ct_lower or "json" in ct_lower or "text" in ct_lower:
+            logger.warning(f"/embed/url: non-image content-type {content_type!r} for {url[:80]}")
+            return EmbedUrlResponse(embedding=None)
+
+        # Reject suspiciously small payloads (< 500 bytes cannot be a real image)
+        if len(raw) < 500:
+            logger.warning(f"/embed/url: payload too small ({len(raw)} bytes) for {url[:80]}")
+            return EmbedUrlResponse(embedding=None)
+
+        try:
+            image = PilImage.open(io.BytesIO(raw)).convert("RGB")
+        except Exception as pil_err:
+            logger.warning(f"/embed/url: PIL.open failed ({pil_err}) magic={magic} for {url[:80]}")
+            return EmbedUrlResponse(embedding=None)
+
         embedding = embedder.get_embedding(image)
         logger.info(
             f"timing embed-url: {(time.perf_counter() - t0)*1000:.0f}ms  "
-            f"bytes={len(raw)} present={embedding is not None}"
+            f"size={image.width}x{image.height} present={embedding is not None}"
         )
         return EmbedUrlResponse(embedding=embedding)
+
+    except urllib.error.HTTPError as e:
+        logger.warning(f"/embed/url: HTTP {e.code} for {url[:80]}")
+        return EmbedUrlResponse(embedding=None)
+    except urllib.error.URLError as e:
+        logger.warning(f"/embed/url: URL error ({e.reason}) for {url[:80]}")
+        return EmbedUrlResponse(embedding=None)
     except Exception as e:
-        logger.warning(f"/embed/url failed for {request.image_url}: {e}")
+        logger.warning(f"/embed/url: unexpected error ({type(e).__name__}: {e}) for {url[:80]}")
         return EmbedUrlResponse(embedding=None)
