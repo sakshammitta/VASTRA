@@ -89,18 +89,37 @@ class R2Client:
         is_png  = raw[:8] == b'\x89PNG\r\n\x1a\n'
         is_webp = raw[:4] == b'RIFF' and raw[8:12] == b'WEBP'
         is_gif  = raw[:6] in (b'GIF87a', b'GIF89a')
+        # HEIC/HEIF: 4-byte box size + b'ftyp' + brand (heic/heif/mif1/msf1)
+        is_heic = (len(raw) >= 12 and raw[4:8] == b'ftyp'
+                   and raw[8:12] in (b'heic', b'heif', b'mif1', b'msf1', b'heix', b'avif'))
         is_image = is_jpeg or is_png or is_webp or is_gif
 
         if not is_image:
-            # Likely an XML/HTML error page or unexpected response body
-            head_bytes = raw[:128]
-            head_text  = head_bytes.decode("utf-8", errors="replace")
+            head_bytes  = raw[:128]
+            head_text   = head_bytes.decode("utf-8", errors="replace")
             hex_preview = magic.hex()
-            logger.error(
-                f"R2 key='{key}' returned {len(raw)} bytes that are NOT a recognised image. "
-                f"First 16 bytes (hex): {hex_preview} | text: {head_text!r}"
-            )
-            # Persist bad payload so it can be inspected in the container
+
+            if is_heic:
+                brand = raw[8:12].decode("ascii", errors="replace")
+                detail = (
+                    f"R2 key='{key}' contains HEIC/HEIF data (ftyp brand='{brand}') "
+                    f"but was stored with a .jpg key. "
+                    "The Android app must normalize images to JPEG before upload."
+                )
+            elif head_text.lstrip().startswith("<"):
+                detail = (
+                    f"R2 key='{key}' returned an XML/HTML error page ({len(raw)} bytes). "
+                    "Likely an expired presigned URL or a bucket permission error. "
+                    f"Preview: {head_text[:200]!r}"
+                )
+            else:
+                detail = (
+                    f"R2 key='{key}' returned {len(raw)} unrecognised bytes "
+                    f"(first 16 hex: {hex_preview}). "
+                    f"Preview: {head_text[:200]!r}"
+                )
+
+            logger.error(detail)
             try:
                 import tempfile, pathlib
                 tmp = pathlib.Path(tempfile.gettempdir()) / f"debug_failed_image_fetch_{key.replace('/', '_')}.bin"
@@ -108,13 +127,7 @@ class R2Client:
                 logger.error(f"Bad R2 payload saved to {tmp}")
             except Exception:
                 pass
-            raise R2DownloadError(
-                "not_image",
-                f"R2 key='{key}' returned {len(raw)} non-image bytes "
-                f"(first 16 hex: {hex_preview}). "
-                "Likely an expired presigned URL response, XML error page, or wrong content. "
-                f"Preview: {head_text[:200]!r}",
-            )
+            raise R2DownloadError("not_image", detail)
 
         try:
             return Image.open(buf).convert("RGB")

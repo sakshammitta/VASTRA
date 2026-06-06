@@ -1,7 +1,10 @@
 package com.vastra.ui.wardrobe
 
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
+import androidx.exifinterface.media.ExifInterface
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -1401,20 +1404,54 @@ private fun parseHexColor(hex: String): Color = try {
 } catch (e: Exception) { Color.LightGray }
 
 /** Copy a content URI to a temporary file so it can be sent as a multipart body. */
+/**
+ * Converts any gallery Uri to a JPEG temp file, correctly applying EXIF rotation.
+ *
+ * Why: iOS/Android devices often produce HEIC/HEIF images even when the URI
+ * looks like a .jpg. Uploading raw HEIC bytes under a .jpg filename causes
+ * PIL on the CV service to fail with "cannot identify image file". By
+ * decoding through BitmapFactory (which delegates to the OS for HEIC) and
+ * re-encoding as JPEG, we always upload bytes that start with FF D8 FF.
+ */
 fun Uri.toTempFile(context: Context): File {
     val t0 = System.currentTimeMillis()
     val mime = context.contentResolver.getType(this)
-    val input = context.contentResolver.openInputStream(this)!!
-    val suffix = when (mime) {
-        "image/png"  -> ".png"
-        "image/webp" -> ".webp"
-        else         -> ".jpg"
+    android.util.Log.d("VastraScan", "toTempFile: mime=$mime uri=$this")
+
+    // Read all bytes so we can both inspect EXIF and decode the bitmap.
+    val rawBytes = context.contentResolver.openInputStream(this)!!.use { it.readBytes() }
+
+    // Decode into a Bitmap — BitmapFactory handles JPEG, PNG, WebP, and (on API 28+) HEIC.
+    val bitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+        ?: throw IllegalStateException("BitmapFactory could not decode image (mime=$mime)")
+
+    // Read EXIF rotation from the raw bytes stream (ExifInterface doesn't need a File).
+    val exif = rawBytes.inputStream().use { ExifInterface(it) }
+    val rotation = when (exif.getAttributeInt(
+            ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+        ExifInterface.ORIENTATION_ROTATE_90  -> 90f
+        ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+        ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+        else                                  -> 0f
     }
-    val tmp = File.createTempFile("scan_", suffix, context.cacheDir)
-    tmp.outputStream().use { input.copyTo(it) }
+    val oriented = if (rotation != 0f) {
+        val m = Matrix().apply { postRotate(rotation) }
+        android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, m, true)
+            .also { if (it !== bitmap) bitmap.recycle() }
+    } else bitmap
+
+    // Always save as JPEG so the CV service always receives FF D8 FF magic bytes.
+    val tmp = File.createTempFile("scan_", ".jpg", context.cacheDir)
+    tmp.outputStream().use { out ->
+        oriented.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+    }
+    oriented.recycle()
+
     android.util.Log.d(
         "VastraScan",
-        "timing uri→file: ${System.currentTimeMillis() - t0}ms  mime=$mime size=${tmp.length()}B"
+        "timing uri→jpeg: ${System.currentTimeMillis() - t0}ms  " +
+            "mime=$mime originalBytes=${rawBytes.size}B jpegBytes=${tmp.length()}B " +
+            "dims=${oriented.width}x${oriented.height} rotation=${rotation}°"
     )
     return tmp
 }

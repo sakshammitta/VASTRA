@@ -83,6 +83,7 @@ dependencies {
 
     implementation(libs.security.crypto)
     implementation(libs.coroutines.android)
+    implementation(libs.androidx.exifinterface)
 
     debugImplementation(libs.compose.ui.tooling.preview)
 }
