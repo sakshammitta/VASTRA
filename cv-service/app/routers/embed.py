@@ -36,8 +36,15 @@ async def scan_and_embed(request: ScanAndEmbedRequest):
         t0 = time.perf_counter()
         image = _r2.download_image(request.image_key)
         logger.info(f"timing r2-fetch: {(time.perf_counter() - t0)*1000:.0f}ms  {image.width}x{image.height}")
+    except r2_module.R2DownloadError as e:
+        # 404 only for genuinely-missing objects; 502/503 for auth/network/config
+        # so the client message reflects the real cause instead of "not found".
+        status = 404 if e.kind == "not_found" else 502
+        logger.error(f"/embed/full r2-fetch failed kind={e.kind}: {e}")
+        raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Image not found: {request.image_key}")
+        logger.error(f"/embed/full r2-fetch unexpected error: {e}")
+        raise HTTPException(status_code=502, detail=f"Image fetch failed: {e}")
 
     t0 = time.perf_counter()
     if request.scan_mode == "single":
@@ -68,8 +75,13 @@ async def classify_whole_image(request: ScanAndEmbedRequest):
         t0 = time.perf_counter()
         image = _r2.download_image(request.image_key)
         logger.info(f"timing r2-fetch: {(time.perf_counter() - t0)*1000:.0f}ms  {image.width}x{image.height}")
+    except r2_module.R2DownloadError as e:
+        status = 404 if e.kind == "not_found" else 502
+        logger.error(f"/embed/whole r2-fetch failed kind={e.kind}: {e}")
+        raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Image not found: {request.image_key}")
+        logger.error(f"/embed/whole r2-fetch unexpected error: {e}")
+        raise HTTPException(status_code=502, detail=f"Image fetch failed: {e}")
 
     # Synthetic full-frame detection so the response shape matches /embed/full.
     full_frame = Detection(
@@ -143,8 +155,13 @@ async def embed_detections(request: EmbedRequest):
         t0 = time.perf_counter()
         image = _r2.download_image(request.image_key)
         logger.info(f"timing r2-fetch: {(time.perf_counter() - t0)*1000:.0f}ms  {image.width}x{image.height}")
+    except r2_module.R2DownloadError as e:
+        status = 404 if e.kind == "not_found" else 502
+        logger.error(f"/embed r2-fetch failed kind={e.kind}: {e}")
+        raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Image not found: {request.image_key}")
+        logger.error(f"/embed r2-fetch unexpected error: {e}")
+        raise HTTPException(status_code=502, detail=f"Image fetch failed: {e}")
 
     items = _embed_detections(image, request.detections)
     logger.info(f"timing embed-total: {(time.perf_counter() - t0_total)*1000:.0f}ms  items={len(items)}")

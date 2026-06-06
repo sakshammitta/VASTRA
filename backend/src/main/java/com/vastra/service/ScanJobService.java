@@ -73,10 +73,24 @@ public class ScanJobService {
             job.put("detectedItems", detectedItems);
             job.put("completedAt", Instant.now().toString());
             log.info("timing scan-job-total: {}ms  job={}", System.currentTimeMillis() - t0Job, jobId);
+        } catch (org.springframework.web.client.RestClientResponseException e) {
+            // CV returned a non-2xx — surface its JSON `detail` so the app shows
+            // the real cause (R2 auth/network/missing key) not a blanket error.
+            String detail = e.getResponseBodyAsString();
+            String reason = detail;
+            try {
+                var node = objectMapper.readTree(detail);
+                if (node.hasNonNull("detail")) reason = node.get("detail").asText();
+            } catch (Exception ignored) { /* keep raw body */ }
+            log.error("scan job {} FAILED: CV {} returned {} — {}",
+                    jobId, cvServiceUrl, e.getRawStatusCode(), reason);
+            job.put("status", "FAILED");
+            job.put("errorMessage", "Detection service error: " + reason);
+            job.put("completedAt", Instant.now().toString());
         } catch (Exception e) {
             log.error("scan job {} FAILED calling CV service at {}: {}", jobId, cvServiceUrl, e.toString());
             job.put("status", "FAILED");
-            job.put("errorMessage", "CV service error: " + e.getMessage());
+            job.put("errorMessage", "Could not reach the detection service: " + e.getMessage());
             job.put("completedAt", Instant.now().toString());
         }
 

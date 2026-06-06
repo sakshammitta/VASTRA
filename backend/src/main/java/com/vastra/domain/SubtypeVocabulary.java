@@ -53,34 +53,65 @@ public final class SubtypeVocabulary {
 
     // ── Other categories (seed values; extend as worn-outfit testing matures) ─
     public static final List<Subtype> TOPS = List.of(
-            new Subtype("t-shirt",   ClothingCategory.TOP, 2),
-            new Subtype("shirt",     ClothingCategory.TOP, 4),
-            new Subtype("polo shirt", ClothingCategory.TOP, 3),
-            new Subtype("blouse",    ClothingCategory.TOP, 4),
-            new Subtype("tank top",  ClothingCategory.TOP, 2),
-            new Subtype("sweater",   ClothingCategory.TOP, 3),
-            new Subtype("hoodie",    ClothingCategory.TOP, 1)
+            new Subtype("t-shirt",        ClothingCategory.TOP, 2),
+            new Subtype("shirt",          ClothingCategory.TOP, 4),
+            new Subtype("button-up shirt", ClothingCategory.TOP, 4),
+            new Subtype("polo",           ClothingCategory.TOP, 3),
+            new Subtype("polo shirt",     ClothingCategory.TOP, 3),
+            new Subtype("blouse",         ClothingCategory.TOP, 4),
+            new Subtype("tank top",       ClothingCategory.TOP, 2),
+            new Subtype("long sleeve",    ClothingCategory.TOP, 2),
+            new Subtype("jersey",         ClothingCategory.TOP, 1),
+            new Subtype("sweater",        ClothingCategory.TOP, 3),
+            new Subtype("sweatshirt",     ClothingCategory.TOP, 2),
+            new Subtype("crewneck",       ClothingCategory.TOP, 2),
+            new Subtype("hoodie",         ClothingCategory.TOP, 1),
+            new Subtype("zip-up hoodie",  ClothingCategory.TOP, 1),
+            new Subtype("vest",           ClothingCategory.TOP, 3),
+            new Subtype("kurta",          ClothingCategory.TOP, 3)
     );
 
     public static final List<Subtype> OUTERWEAR = List.of(
-            new Subtype("jacket", ClothingCategory.OUTERWEAR, 3),
-            new Subtype("coat",   ClothingCategory.OUTERWEAR, 4),
-            new Subtype("blazer", ClothingCategory.OUTERWEAR, 5)
+            new Subtype("jacket",        ClothingCategory.OUTERWEAR, 3),
+            new Subtype("coat",          ClothingCategory.OUTERWEAR, 4),
+            new Subtype("blazer",        ClothingCategory.OUTERWEAR, 5),
+            new Subtype("nehru jacket",  ClothingCategory.OUTERWEAR, 4),
+            new Subtype("ethnic jacket", ClothingCategory.OUTERWEAR, 4)
     );
 
     public static final List<Subtype> FOOTWEAR = List.of(
-            new Subtype("sneakers", ClothingCategory.FOOTWEAR, 2),
-            new Subtype("shoes",    ClothingCategory.FOOTWEAR, 4),
-            new Subtype("boots",    ClothingCategory.FOOTWEAR, 3),
-            new Subtype("sandals",  ClothingCategory.FOOTWEAR, 2),
-            new Subtype("clogs",    ClothingCategory.FOOTWEAR, 1)
+            new Subtype("sneakers",      ClothingCategory.FOOTWEAR, 2),
+            new Subtype("shoes",         ClothingCategory.FOOTWEAR, 4),
+            new Subtype("boots",         ClothingCategory.FOOTWEAR, 3),
+            new Subtype("sandals",       ClothingCategory.FOOTWEAR, 2),
+            new Subtype("slides",        ClothingCategory.FOOTWEAR, 1),
+            new Subtype("loafers",       ClothingCategory.FOOTWEAR, 4),
+            new Subtype("heels",         ClothingCategory.FOOTWEAR, 4),
+            new Subtype("formal shoes",  ClothingCategory.FOOTWEAR, 5),
+            new Subtype("running shoes", ClothingCategory.FOOTWEAR, 2),
+            new Subtype("clogs",         ClothingCategory.FOOTWEAR, 1)
+    );
+
+    // ── Traditional / ethnic wear ─────────────────────────────────────────────
+    public static final List<Subtype> TRADITIONAL = List.of(
+            new Subtype("kurta pajama",   ClothingCategory.SUIT, 4),
+            new Subtype("sherwani",       ClothingCategory.SUIT, 5),
+            new Subtype("saree",          ClothingCategory.DRESS, 5),
+            new Subtype("lehenga",        ClothingCategory.DRESS, 5),
+            new Subtype("salwar kameez",  ClothingCategory.DRESS, 4),
+            new Subtype("anarkali",       ClothingCategory.DRESS, 5),
+            new Subtype("dupatta",        ClothingCategory.ACCESSORY, 4)
+    );
+
+    public static final List<Subtype> SUITS = List.of(
+            new Subtype("suit", ClothingCategory.SUIT, 5)
     );
 
     /** All known subtypes across categories, keyed by normalized lowercase name. */
     public static final Map<String, Subtype> ALL;
     static {
         var builder = new java.util.HashMap<String, Subtype>();
-        for (var group : List.of(BOTTOMS, TOPS, OUTERWEAR, FOOTWEAR)) {
+        for (var group : List.of(BOTTOMS, TOPS, OUTERWEAR, FOOTWEAR, TRADITIONAL, SUITS)) {
             for (var s : group) builder.put(s.name().toLowerCase(), s);
         }
         ALL = Map.copyOf(builder);

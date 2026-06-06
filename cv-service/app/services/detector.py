@@ -22,13 +22,24 @@ _ALLOW_MOCK: bool = os.getenv("CV_ALLOW_MOCK", "false").lower() == "true"
 _DINO_MAX_SIDE: int = int(os.getenv("DINO_MAX_SIDE", "1280"))
 
 CLOTHING_PROMPT = (
-    "shirt . t-shirt . blouse . top . sweater . hoodie . "
+    "shirt . t-shirt . blouse . top . sweater . sweatshirt . hoodie . kurta . "
     "pants . trousers . jeans . shorts . skirt . "
     "jacket . coat . blazer . "
     "dress . jumpsuit . "
-    "shoes . boots . sneakers . "
+    "shoe . shoes . pair of shoes . sneaker . sneakers . boot . boots . "
+    "sandal . sandals . slides . loafers . heels . running shoe . formal shoe . "
     "bag . handbag . backpack . "
     "hat . scarf . belt"
+)
+
+# Footwear-focused prompt for single-item shoe scans. Grounding-DINO localises
+# footwear far better with shoe-specific nouns than with the general clothing
+# prompt, and a standalone product/È-commerce shoe photo is NOT "worn by person"
+# so the worn-outfit prompt misses it entirely (root cause of 0 detections).
+FOOTWEAR_PROMPT = (
+    "shoe . pair of shoes . sneaker . sneakers . trainer . running shoe . "
+    "boot . boots . sandal . sandals . slides . flip flops . loafer . loafers . "
+    "heel . heels . formal shoe . dress shoe . clog . clogs . footwear"
 )
 
 # Worn-outfit prompt: "<garment> worn by person" phrasing substantially improves
@@ -42,8 +53,10 @@ CLOTHING_PROMPT = (
 WORN_OUTFIT_PROMPT = (
     "shirt worn by person . t-shirt worn by person . "
     "jeans worn by person . trousers worn by person . pants worn by person . "
-    "hoodie worn by person . jacket worn by person . "
-    "shorts worn by person . skirt worn by person . shoes worn by person"
+    "hoodie worn by person . sweatshirt worn by person . jacket worn by person . "
+    "shorts worn by person . skirt worn by person . "
+    "shoes worn by person . sneakers worn by person . boots worn by person . "
+    "hat worn by person . beanie worn by person"
 )
 
 # Minimum garment box area (fraction of full image) to be considered a real
@@ -117,6 +130,7 @@ def detect_clothing(
     image: Image.Image,
     box_threshold: float = 0.35,
     text_threshold: float = 0.25,
+    prompt: str = None,
 ) -> list[Detection]:
     """
     Run Grounding-DINO on *image* and return deduplicated clothing detections.
@@ -124,6 +138,8 @@ def detect_clothing(
     The image is resized to at most DINO_MAX_SIDE on its longest edge before
     inference.  Bounding boxes are always normalized (0-1) relative to whatever
     image size DINO sees, so they remain valid for the full-resolution original.
+
+    *prompt* overrides CLOTHING_PROMPT (e.g. FOOTWEAR_PROMPT for shoe scans).
 
     If the model is not loaded:
     - CV_ALLOW_MOCK=true  → return labelled mock detections (dev only).
@@ -136,6 +152,7 @@ def detect_clothing(
         logger.warning("Grounding-DINO not loaded; returning empty detections.")
         return []
 
+    prompt = prompt or CLOTHING_PROMPT
     try:
         import torch
 
@@ -146,7 +163,7 @@ def detect_clothing(
         device = next(_grounding_dino_model.parameters()).device
         inputs = _grounding_dino_processor(
             images=inference_image,
-            text=CLOTHING_PROMPT,
+            text=prompt,
             return_tensors="pt",
         ).to(device)
         pre_ms = (time.perf_counter() - t_pre) * 1000
@@ -325,9 +342,26 @@ def detect_single_item(image: Image.Image) -> list[Detection]:
     fragment.
 
     Falls back to detect_worn_outfit() behaviour if model is not loaded.
+
+    Detection fallback chain (single-item photos are often flat-lay product
+    shots, NOT worn — the worn-outfit prompt misses standalone shoes/items):
+      1. detect_worn_outfit()  — best for items photographed on the body
+      2. detect_clothing()     — general flat-lay prompt (incl. footwear nouns)
+      3. detect_clothing(FOOTWEAR_PROMPT) — shoe-specific last resort
+    The first stage that yields ≥1 detection wins.
     """
     candidates = detect_worn_outfit(image)
-    if len(candidates) <= 1:
+    if not candidates:
+        logger.info("single-item: worn-outfit found 0 → trying flat-lay CLOTHING_PROMPT")
+        candidates = detect_clothing(image, box_threshold=0.30, text_threshold=0.22)
+    if not candidates:
+        logger.info("single-item: flat-lay found 0 → trying FOOTWEAR_PROMPT")
+        candidates = detect_clothing(image, box_threshold=0.25, text_threshold=0.20,
+                                     prompt=FOOTWEAR_PROMPT)
+    if not candidates:
+        logger.warning("single-item: 0 detections after all fallbacks (worn-outfit, flat-lay, footwear)")
+        return []
+    if len(candidates) == 1:
         return candidates
 
     def _dominance(d: Detection) -> float:

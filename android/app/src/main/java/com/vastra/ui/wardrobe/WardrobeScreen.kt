@@ -682,7 +682,9 @@ private fun ImageSourceSection(
 
                 is ImageSourceState.WebCandidatesAvailable -> {
                     val c = state.current
-                    var showPreview by remember(state.shownIndex) { mutableStateOf(false) }
+                    // NOT keyed to shownIndex — advancing to the next candidate must
+                    // keep the large preview open and just swap its contents.
+                    var showPreview by remember { mutableStateOf(false) }
 
                     // Candidate row — tap image to open full preview.
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -766,22 +768,31 @@ private fun ImageSourceSection(
                             ) { Text("Show alternatives", style = MaterialTheme.typography.labelSmall, color = VastraInk) }
                         }
                     }
-                    TextButton(
+                    // Obvious AI-fallback CTA (not plain text) so users immediately
+                    // recognise the "generate clean image" action.
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedButton(
                         onClick = onRejectWebMatch,
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                        modifier = Modifier.fillMaxWidth().height(40.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, VastraInk),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = VastraInk)
                     ) {
-                        Text("None of these — generate clean image",
+                        Icon(Icons.Outlined.AutoAwesome, null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("None of these match — generate clean image",
                             style = MaterialTheme.typography.labelSmall, color = VastraInk)
                     }
 
-                    // Full-size candidate preview dialog.
+                    // Full-size candidate preview dialog. "Next" keeps it OPEN and
+                    // swaps contents (c updates as shownIndex advances on recomposition).
                     if (showPreview) {
                         WebCandidatePreviewSheet(
                             candidate = c,
                             candidateIndex = state.shownIndex,
                             totalCandidates = state.candidates.size,
                             onUseThis = { showPreview = false; onConfirmWebMatch() },
-                            onNext = if (state.hasMore) ({ showPreview = false; onShowNextWebCandidate() }) else null,
+                            onNext = if (state.hasMore) onShowNextWebCandidate else null,
                             onGenerateInstead = { showPreview = false; onRejectWebMatch() },
                             onDismiss = { showPreview = false }
                         )

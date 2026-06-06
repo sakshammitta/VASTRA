@@ -200,9 +200,10 @@ public class ImageEnhancementService {
                         int score = scoreCandidate(sourceUrl, title, subLower, brandTokens,
                                 p.path("original_dimensions"), true);
                         if (score > Integer.MIN_VALUE) {
-                            String colorWarn = colorWarning(title, detectedColorNames, subLower);
+                            String warn = combinedWarning(title, detectedColorNames);
+                            if (warn != null) score -= 200;  // demote below clean candidates
                             pool.add(new ScoredCandidate(title, imageUrl, sourceUrl,
-                                    siteName.isBlank() ? null : siteName, score, colorWarn));
+                                    siteName.isBlank() ? null : siteName, score, warn));
                         }
                     }
                 }
@@ -220,15 +221,17 @@ public class ImageEnhancementService {
                         int score = scoreCandidate(sourceUrl, title, subLower, brandTokens,
                                 m.path("original_dimensions"), false);
                         if (score > Integer.MIN_VALUE) {
-                            String colorWarn = colorWarning(title, detectedColorNames, subLower);
+                            String warn = combinedWarning(title, detectedColorNames);
+                            if (warn != null) score -= 200;  // demote below clean candidates
                             pool.add(new ScoredCandidate(title, imageUrl, sourceUrl,
-                                    siteName.isBlank() ? null : siteName, score, colorWarn));
+                                    siteName.isBlank() ? null : siteName, score, warn));
                         }
                     }
                 }
             }
 
-            // Sort: candidates with no color warning first, then by score.
+            // Sort: clean front-view, correct-color candidates first (no warning),
+            // then by score. A warned candidate never outranks a clean one.
             pool.sort(Comparator
                 .<ScoredCandidate, Boolean>comparing(c -> c.colorWarning() != null)
                 .thenComparingInt(ScoredCandidate::score).reversed());
@@ -240,9 +243,19 @@ public class ImageEnhancementService {
                 if (sc.score() < WARDROBE_QUALITY_THRESHOLD) break;
                 String domain = rootDomain(sc.sourceUrl());
                 if (!seenDomains.add(domain)) continue;
+                // Strengthen the color check on the shortlist by inspecting the actual
+                // thumbnail pixels (title words alone miss logo/base-color swaps).
+                String warning = sc.colorWarning();
+                if (warning == null && !detectedColorNames.isEmpty()) {
+                    warning = thumbnailColorWarning(sc.imageUrl(), detectedColorNames);
+                }
                 results.add(new WebMatchCandidate(
-                    sc.title(), sc.imageUrl(), sc.sourceUrl(), sc.siteName(), sc.colorWarning()));
+                    sc.title(), sc.imageUrl(), sc.sourceUrl(), sc.siteName(), warning));
             }
+
+            // Re-sort the final shortlist so any candidate that picked up a
+            // thumbnail color/back-view warning drops below clean ones.
+            results.sort(Comparator.comparing(c -> c.colorWarning() != null));
 
             if (results.isEmpty()) {
                 log.info("web-match: no wardrobe-quality candidates for {}/{} (pool={}, textHint='{}' — suggest AI render)",
@@ -346,24 +359,95 @@ public class ImageEnhancementService {
     }
 
     /**
+     * Combined display warning for a candidate, or null when it looks clean.
+     * Checks (in priority order):
+     *   1. Back/partial view in the title — not useful as a wardrobe front image.
+     *   2. Title names a color that conflicts with the detected palette.
+     */
+    private String combinedWarning(String title, List<String> detectedColorNames) {
+        String backWarn = backOrPartialViewWarning(title);
+        if (backWarn != null) return backWarn;
+        return colorWarning(title, detectedColorNames);
+    }
+
+    /**
+     * Returns a warning when the title indicates a back or partial view, which
+     * hides the front graphic/logo/color placement needed for wardrobe matching.
+     */
+    private String backOrPartialViewWarning(String title) {
+        String t = title.toLowerCase();
+        if (t.contains("back view") || t.contains("rear view") || t.contains("back of ")
+            || t.contains("reverse view") || t.contains("(back)") || t.contains(" back print")) {
+            return "Back/partial view — verify before using (front graphics may be missing).";
+        }
+        if (t.contains("close-up") || t.contains("closeup") || t.contains("detail view")
+            || t.contains("cropped")) {
+            return "Partial/detail view — verify the full item is shown before using.";
+        }
+        return null;
+    }
+
+    /**
      * Returns a color-mismatch warning string when the title clearly mentions a
      * color that conflicts with the item's detected dominant color, or null when
-     * colors are consistent or unknown. Used to flag candidates for display
-     * ("Note: this shows a red version — your item has a white logo").
+     * colors are consistent or unknown.
      */
-    private String colorWarning(String title, List<String> detectedColorNames, String subLower) {
+    private String colorWarning(String title, List<String> detectedColorNames) {
         if (detectedColorNames.isEmpty()) return null;
         String titleLower = title.toLowerCase();
         for (Map.Entry<String, int[][]> e : COLOR_RANGES.entrySet()) {
             String colorName = e.getKey();
             if (titleLower.contains(colorName)) {
-                // Title explicitly names a color — check if it matches detected palette.
                 boolean matchesDetected = detectedColorNames.stream()
                     .anyMatch(d -> d.equals(colorName) || relatedColors(d, colorName));
                 if (!matchesDetected) {
                     return "Note: this image shows a " + colorName + " version — verify it matches your item.";
                 }
             }
+        }
+        return null;
+    }
+
+    /**
+     * Best-effort thumbnail color check: download the candidate thumbnail, compute
+     * its dominant color name, and warn if it isn't present in the detected
+     * palette. Catches base-color / logo-color swaps that the title never names.
+     * Bounded to the small shortlist (≤ MAX_WEB_CANDIDATES) and fully guarded —
+     * any failure returns null (no warning) rather than blocking the candidate.
+     */
+    private String thumbnailColorWarning(String imageUrl, List<String> detectedColorNames) {
+        try {
+            byte[] bytes = restClient.get().uri(imageUrl).retrieve().body(byte[].class);
+            if (bytes == null || bytes.length == 0) return null;
+            java.awt.image.BufferedImage img =
+                javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes));
+            if (img == null) return null;
+
+            // Sample the central 60% region (avoids white studio borders) and average.
+            int w = img.getWidth(), h = img.getHeight();
+            int x0 = (int) (w * 0.2), x1 = (int) (w * 0.8);
+            int y0 = (int) (h * 0.2), y1 = (int) (h * 0.8);
+            long rs = 0, gs = 0, bs = 0; int n = 0;
+            int step = Math.max(1, (x1 - x0) / 40);  // subsample for speed
+            for (int y = y0; y < y1; y += step) {
+                for (int x = x0; x < x1; x += step) {
+                    int rgb = img.getRGB(x, y);
+                    rs += (rgb >> 16) & 0xFF; gs += (rgb >> 8) & 0xFF; bs += rgb & 0xFF; n++;
+                }
+            }
+            if (n == 0) return null;
+            String hex = String.format("#%02X%02X%02X", rs / n, gs / n, bs / n);
+            String thumbColor = hexToColorName(hex);
+            if (thumbColor == null) return null;  // can't classify → don't warn
+
+            boolean matches = detectedColorNames.stream()
+                .anyMatch(d -> d.equals(thumbColor) || relatedColors(d, thumbColor));
+            if (!matches) {
+                log.debug("web-match: thumbnail color {} not in detected {} — warning", thumbColor, detectedColorNames);
+                return "This image looks " + thumbColor + ", which differs from your item's color — verify before using.";
+            }
+        } catch (Exception e) {
+            log.debug("web-match: thumbnail color check skipped ({})", e.getMessage());
         }
         return null;
     }
