@@ -69,6 +69,12 @@ interface VastraApiService {
     @DELETE("api/wardrobe/items/{id}")
     suspend fun deleteItem(@Path("id") itemId: String): Response<Unit>
 
+    @PUT("api/wardrobe/items/{id}")
+    suspend fun updateItem(
+        @Path("id") itemId: String,
+        @Body request: UpdateItemRequest
+    ): Response<ClothingItem>
+
     @POST("api/wardrobe/scan/{jobId}/confirm")
     suspend fun confirmScanItem(
         @Path("jobId") jobId: String,
@@ -147,6 +153,16 @@ data class CreateItemRequest(
     val tags: List<String>,
     val brand: String?,
     val priceUsd: Float?
+)
+/** Partial update — only non-null fields are applied; applying any marks the
+ *  item user-edited so the correction becomes canonical (User edit > AI). */
+data class UpdateItemRequest(
+    val category: String? = null,
+    val subCategory: String? = null,
+    val brand: String? = null,
+    val ownershipStatus: String? = null,
+    val priceUsd: Float? = null,
+    val tags: List<String>? = null
 )
 data class ConfirmScanItemRequest(
     val itemIndex: Int,

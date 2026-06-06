@@ -205,7 +205,10 @@ fun WardrobeScreen(
                         ClothingItemCard(
                             item = item,
                             onDelete = { viewModel.deleteItem(item.id) },
-                            onEnhance = { viewModel.openEnhanceSheet(item) }
+                            onEnhance = { viewModel.openEnhanceSheet(item) },
+                            onEdit = { category, subCategory ->
+                                viewModel.updateItem(item.id, category, subCategory)
+                            }
                         )
                     }
                 }
@@ -1236,8 +1239,25 @@ fun CategoryFilterRow(selectedCategory: ClothingCategory?, onCategorySelected: (
 }
 
 @Composable
-fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit, onEnhance: () -> Unit = {}) {
+fun ClothingItemCard(
+    item: ClothingItem,
+    onDelete: () -> Unit,
+    onEnhance: () -> Unit = {},
+    onEdit: (ClothingCategory, String) -> Unit = { _, _ -> }
+) {
     var showMenu by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+
+    if (showEditDialog) {
+        EditItemDialog(
+            item = item,
+            onDismiss = { showEditDialog = false },
+            onSave = { category, subCategory ->
+                showEditDialog = false
+                onEdit(category, subCategory)
+            }
+        )
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1294,17 +1314,43 @@ fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit, onEnhance: () -> 
                             }
                         }
                     }
-                    Surface(
+                    Row(
                         modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
-                        color = Color.Black.copy(alpha = 0.55f),
-                        shape = RoundedCornerShape(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text(
-                            item.category.label,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelSmall
-                        )
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.55f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                item.category.label,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                        if (item.userEdited) {
+                            Surface(
+                                color = VastraInk.copy(alpha = 0.85f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Edit, null,
+                                        modifier = Modifier.size(10.dp), tint = Color.White
+                                    )
+                                    Text(
+                                        "Edited",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 Column(modifier = Modifier.padding(10.dp)) {
@@ -1337,6 +1383,10 @@ fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit, onEnhance: () -> 
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(
+                        text = { Text("Edit type") },
+                        onClick = { showMenu = false; showEditDialog = true }
+                    )
+                    DropdownMenuItem(
                         text = { Text("Create clean image") },
                         onClick = { showMenu = false; onEnhance() }
                     )
@@ -1345,6 +1395,59 @@ fun ClothingItemCard(item: ClothingItem, onDelete: () -> Unit, onEnhance: () -> 
             }
         }
     }
+}
+
+/**
+ * Edit a saved item's category + type. Saving sends a partial update to the
+ * backend, which marks the item user-edited so this correction becomes canonical
+ * and is never overwritten by AI (User edit > AI suggestion).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditItemDialog(
+    item: ClothingItem,
+    onDismiss: () -> Unit,
+    onSave: (ClothingCategory, String) -> Unit
+) {
+    var category by remember { mutableStateOf(item.category) }
+    var subCategory by remember { mutableStateOf(item.subCategory) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit item type") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Your correction becomes the saved truth and won't be changed by AI.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = VastraMutedText
+                )
+                CategoryDropdown(
+                    selected = category,
+                    onSelected = { newCat ->
+                        // Clear the type when switching category so a stale subtype
+                        // (e.g. "Coat" under FOOTWEAR) doesn't carry over.
+                        if (newCat != category) subCategory = ""
+                        category = newCat
+                    }
+                )
+                SubtypeField(
+                    category = category,
+                    value = subCategory,
+                    aiSuggestion = "",
+                    onValueChange = { subCategory = it }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(category, subCategory.trim()) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable

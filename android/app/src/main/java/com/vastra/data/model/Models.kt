@@ -55,7 +55,11 @@ data class ClothingItem(
     val addedAt: String = "",
     // PENDING | CROP | WEB_PRODUCT | AI_RENDER — nullable so an absent/unknown
     // source from the backend never crashes deserialization or the card.
-    val displayImageSource: String? = null
+    val displayImageSource: String? = null,
+    // True once the user corrected this item's identity. The category/subCategory
+    // above is then user-authoritative and won't be overwritten by AI.
+    val userEdited: Boolean = false,
+    val userEditedAt: String? = null
 )
 
 enum class OwnershipStatus { OWNED, ASPIRATIONAL }

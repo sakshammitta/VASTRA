@@ -228,6 +228,15 @@ public class WardrobeController {
         return ResponseEntity.ok(wardrobeService.createItem((UUID) auth.getPrincipal(), req));
     }
 
+    @PutMapping("/items/{id}")
+    public ResponseEntity<ClothingItemDto.ClothingItemResponse> updateItem(
+            @PathVariable UUID id,
+            @RequestBody ClothingItemDto.UpdateItemRequest req,
+            Authentication auth) {
+        return ResponseEntity.ok(
+            wardrobeService.updateItem((UUID) auth.getPrincipal(), id, req));
+    }
+
     @DeleteMapping("/items/{id}")
     public ResponseEntity<Void> deleteItem(@PathVariable UUID id, Authentication auth) {
         wardrobeService.deleteItem((UUID) auth.getPrincipal(), id);

@@ -9,6 +9,7 @@ import com.vastra.data.model.OwnershipStatus
 import com.vastra.data.model.ScanJob
 import com.vastra.data.model.ScanStatus
 import com.vastra.data.model.WebMatchCandidate
+import com.vastra.data.remote.UpdateItemRequest
 import com.vastra.data.repository.ApiResult
 import com.vastra.data.repository.WardrobeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -611,6 +612,34 @@ class WardrobeViewModel @Inject constructor(
                     state.copy(items = state.items.filter { it.id != itemId })
                 }
                 is ApiResult.Error -> {}
+            }
+        }
+    }
+
+    /**
+     * Apply a user correction to a saved item's category/type. The edit is
+     * canonical — the backend marks the item user-edited so AI never reverts it.
+     * On success the item is replaced in-place from the server response.
+     */
+    fun updateItem(
+        itemId: String,
+        category: ClothingCategory? = null,
+        subCategory: String? = null,
+        brand: String? = null
+    ) {
+        viewModelScope.launch {
+            val req = UpdateItemRequest(
+                category = category?.name,
+                subCategory = subCategory,
+                brand = brand
+            )
+            when (val result = repo.updateItem(itemId, req)) {
+                is ApiResult.Success -> _uiState.update { state ->
+                    state.copy(items = state.items.map {
+                        if (it.id == itemId) result.data else it
+                    })
+                }
+                is ApiResult.Error -> _uiState.update { it.copy(error = result.message) }
             }
         }
     }

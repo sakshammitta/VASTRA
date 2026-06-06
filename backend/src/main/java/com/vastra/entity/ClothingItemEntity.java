@@ -75,6 +75,17 @@ public class ClothingItemEntity {
     @Column(name = "ai_model_source")
     private String aiModelSource;
 
+    // ── User-edit provenance (canonical-truth guarantee) ──────────────────────
+    // True once the user has corrected this item's identity (category/subtype/etc.)
+    // after the initial AI scan. When true, the user's category/subCategory is
+    // authoritative and must NOT be overwritten by web-match, AI render, or any
+    // future automated refresh. Rule: User edit > AI suggestion.
+    @Column(name = "user_edited", nullable = false)
+    private boolean userEdited = false;
+
+    @Column(name = "user_edited_at")
+    private Instant userEditedAt;
+
     @Column(columnDefinition = "vector(512)")
     @ColumnTransformer(write = "CAST(? AS vector)")
     private String fashionClipEmbedding;
@@ -304,6 +315,22 @@ public class ClothingItemEntity {
 
     public void setAiModelSource(String aiModelSource) {
         this.aiModelSource = aiModelSource;
+    }
+
+    public boolean isUserEdited() {
+        return userEdited;
+    }
+
+    public void setUserEdited(boolean userEdited) {
+        this.userEdited = userEdited;
+    }
+
+    public Instant getUserEditedAt() {
+        return userEditedAt;
+    }
+
+    public void setUserEditedAt(Instant userEditedAt) {
+        this.userEditedAt = userEditedAt;
     }
 
     public String getFashionClipEmbedding() {

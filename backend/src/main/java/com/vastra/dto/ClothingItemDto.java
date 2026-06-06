@@ -15,7 +15,11 @@ public class ClothingItemDto {
         int styleMatchPercent, String addedAt,
         // Provenance of imageUrl: CROP (real crop), WEB_PRODUCT (confirmed match),
         // or AI_RENDER (generated). Lets the app badge non-real display images.
-        String displayImageSource
+        String displayImageSource,
+        // User-edit provenance: true once the user corrected this item's identity.
+        // The app can badge "edited" and clients know the type is user-authoritative.
+        boolean userEdited,
+        String userEditedAt
     ) {
         public static ClothingItemResponse from(ClothingItemEntity item, String imageUrl, String thumbnailUrl) {
             return new ClothingItemResponse(
@@ -29,10 +33,27 @@ public class ClothingItemDto {
                 item.getPurchasePlatform(), item.getPurchaseUrl(), item.getPriceUsd(),
                 item.getStyleMatchPercent(),
                 item.getAddedAt() != null ? item.getAddedAt().toString() : null,
-                item.getDisplayImageSource() != null ? item.getDisplayImageSource().name() : "PENDING"
+                item.getDisplayImageSource() != null ? item.getDisplayImageSource().name() : "PENDING",
+                item.isUserEdited(),
+                item.getUserEditedAt() != null ? item.getUserEditedAt().toString() : null
             );
         }
     }
+
+    /**
+     * Sent to PUT /api/wardrobe/items/{id} to correct a saved item's identity.
+     * All fields are optional (partial update) — only non-null fields are applied.
+     * Applying any field marks the item user_edited=true so the correction becomes
+     * canonical and is never overwritten by AI/web-match/refresh.
+     */
+    public record UpdateItemRequest(
+        String category,
+        String subCategory,
+        String brand,
+        String ownershipStatus,
+        BigDecimal priceUsd,
+        List<String> tags
+    ) {}
 
     public record CreateItemRequest(
         String catalogId, String ownershipStatus, String category,

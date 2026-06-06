@@ -148,6 +148,18 @@ public class WardrobeService {
         }
         item.setAiModelSource(AI_MODEL_SOURCE);
 
+        // If the user corrected the AI's guess at confirm time, that's already a
+        // canonical user edit — mark it so a future refresh won't revert it and
+        // analytics can measure how often the first prediction was wrong.
+        boolean categoryCorrected = req.category() != null
+                && !req.category().equalsIgnoreCase(mapCvCategory(cvCategory).name());
+        boolean subCategoryCorrected = req.subCategory() != null
+                && !req.subCategory().equalsIgnoreCase(cvSubCategory);
+        if (categoryCorrected || subCategoryCorrected) {
+            item.setUserEdited(true);
+            item.setUserEditedAt(java.time.Instant.now());
+        }
+
         // ── Display image selection ───────────────────────────────────────────
         // Only a user-confirmed web product match or a user-approved AI render
         // may become the wardrobe display image. If neither was confirmed, the
@@ -330,6 +342,62 @@ public class WardrobeService {
         item = itemRepo.findById(item.getId()).orElseThrow();
         String imageUrl = r2Service.getPresignedUrl(item.getEffectiveImageKey());
         return ClothingItemDto.ClothingItemResponse.from(item, imageUrl,
+                r2Service.getPresignedUrl(item.getR2ThumbnailKey()));
+    }
+
+    /**
+     * Apply a user correction to a saved item's identity and mark it as
+     * user-edited. The user value becomes canonical: once user_edited=true the
+     * category/subCategory here is authoritative and must never be overwritten by
+     * AI/web-match/refresh. The original AI guess is preserved in the
+     * ai_predicted_* provenance columns for later model-error analysis.
+     *
+     * Partial update: only non-null fields in the request are applied.
+     */
+    @Transactional
+    public ClothingItemDto.ClothingItemResponse updateItem(
+            UUID userId, UUID itemId, ClothingItemDto.UpdateItemRequest req) {
+        var item = ownedItem(userId, itemId);
+
+        boolean changed = false;
+        if (req.category() != null && !req.category().isBlank()) {
+            item.setCategory(ClothingCategory.valueOf(req.category()));
+            changed = true;
+        }
+        if (req.subCategory() != null) {
+            item.setSubCategory(req.subCategory());
+            changed = true;
+        }
+        if (req.brand() != null) {
+            item.setBrand(req.brand());
+            changed = true;
+        }
+        if (req.ownershipStatus() != null && !req.ownershipStatus().isBlank()) {
+            item.setOwnershipStatus(OwnershipStatus.valueOf(req.ownershipStatus()));
+            changed = true;
+        }
+        if (req.priceUsd() != null) {
+            item.setPriceUsd(req.priceUsd());
+            changed = true;
+        }
+        if (req.tags() != null) {
+            item.setTags(req.tags());
+            changed = true;
+        }
+
+        if (changed) {
+            // Mark the correction as canonical truth. User edit > AI suggestion.
+            item.setUserEdited(true);
+            item.setUserEditedAt(java.time.Instant.now());
+            log.info("item {} user-edited by {} → category={} subCategory='{}'",
+                    itemId, userId, item.getCategory(), item.getSubCategory());
+        }
+
+        item = itemRepo.save(item);
+        itemRepo.flush();
+        item = itemRepo.findById(item.getId()).orElseThrow();
+        return ClothingItemDto.ClothingItemResponse.from(item,
+                r2Service.getPresignedUrl(item.getEffectiveImageKey()),
                 r2Service.getPresignedUrl(item.getR2ThumbnailKey()));
     }
 

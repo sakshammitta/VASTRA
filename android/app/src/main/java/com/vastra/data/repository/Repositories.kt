@@ -203,6 +203,14 @@ class WardrobeRepository @Inject constructor(private val api: VastraApiService) 
         if (r.isSuccessful) ApiResult.Success(Unit) else ApiResult.Error(r.message(), r.code())
     } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
 
+    /** Correct a saved item's identity. The edit becomes canonical (User edit > AI). */
+    suspend fun updateItem(itemId: String, request: UpdateItemRequest): ApiResult<ClothingItem> = try {
+        val r = api.updateItem(itemId, request)
+        val body = r.body()
+        if (r.isSuccessful && body != null) ApiResult.Success(body)
+        else ApiResult.Error(r.message(), r.code())
+    } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+
     /** Build a readable message for a non-2xx HTTP response. Response.message() is
      *  frequently blank, so fall back to the error body, then the status code. */
     private fun httpError(stage: String, code: Int, body: String?, message: String?): String {
