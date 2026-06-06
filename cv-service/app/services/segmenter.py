@@ -111,17 +111,19 @@ def _crop_fallback(
     worn-outfit photos are often tight around the torso and clip the lapels,
     cuffs, and hem. A tighter crop hides the structural cues (long sleeves,
     open-front, lapels) that distinguish a jacket from a vest or hoodie —
-    Google Lens then returns wrong products. A 6% relative pad on each side
-    makes the crop show enough jacket structure to get correct Lens results.
+    Google Lens then returns wrong products and the AI render cannot tell it
+    is a jacket. For an OPEN jacket the sleeves extend to the sides while DINO
+    often boxes only the torso, so we pad HORIZONTALLY more (12%, where the
+    sleeves live) than vertically (6%) to recover the sleeve/lapel silhouette
+    without dragging in the legs/background below.
     """
     w, h = image.size
 
     if _is_outerwear_label(detection_label):
-        # 6% of bbox dimensions on each side, minimum 15px
         bw = (bbox.x_max - bbox.x_min) * w
         bh = (bbox.y_max - bbox.y_min) * h
-        pad_x = max(15, int(bw * 0.06))
-        pad_y = max(15, int(bh * 0.06))
+        pad_x = max(20, int(bw * 0.12))   # wider: capture open-jacket sleeves
+        pad_y = max(15, int(bh * 0.06))   # modest vertical to avoid legs/background
     else:
         pad_x = pad_y = 10
 

@@ -53,10 +53,12 @@ FOOTWEAR_PROMPT = (
 WORN_OUTFIT_PROMPT = (
     "shirt worn by person . t-shirt worn by person . "
     "jeans worn by person . trousers worn by person . pants worn by person . "
-    "hoodie worn by person . sweatshirt worn by person . jacket worn by person . "
+    "hoodie worn by person . sweatshirt worn by person . sweater worn by person . "
+    "jacket worn by person . coat worn by person . blazer worn by person . "
     "shorts worn by person . skirt worn by person . "
     "shoes worn by person . sneakers worn by person . boots worn by person . "
-    "hat worn by person . beanie worn by person"
+    "hat worn by person . beanie worn by person . cap worn by person . "
+    "scarf worn by person"
 )
 
 # Minimum garment box area (fraction of full image) to be considered a real
@@ -65,6 +67,22 @@ WORN_OUTFIT_PROMPT = (
 #   background fragments: area 0.002–0.005
 # Floor of 0.02 drops fragments with a wide safety margin.
 _MIN_GARMENT_AREA: float = float(os.getenv("MIN_GARMENT_AREA", "0.02"))
+
+# Headwear and small accessories (beanie, hat, cap, scarf, belt) legitimately
+# occupy a much smaller fraction of a full-body outfit photo than torso/leg
+# garments — a beanie is typically area ≈ 0.004–0.015. Applying the 0.02 garment
+# floor to them silently drops real items (root cause of "missed the beanie").
+# These labels get a far lower floor so visible accessories are kept.
+_MIN_ACCESSORY_AREA: float = float(os.getenv("MIN_ACCESSORY_AREA", "0.003"))
+_ACCESSORY_KEYWORDS = ("beanie", "hat", "cap", "scarf", "belt", "headwear")
+
+
+def _min_area_for_label(label: str) -> float:
+    """Smaller area floor for headwear/accessories; standard floor otherwise."""
+    norm = label.lower()
+    if any(kw in norm for kw in _ACCESSORY_KEYWORDS):
+        return _MIN_ACCESSORY_AREA
+    return _MIN_GARMENT_AREA
 
 _grounding_dino_model = None
 _grounding_dino_processor = None
@@ -294,8 +312,9 @@ def detect_worn_outfit(image: Image.Image) -> list[Detection]:
             nx_max = min(1.0, x_max / w)
             ny_max = min(1.0, y_max / h)
             area = (nx_max - nx_min) * (ny_max - ny_min)
-            if area < _MIN_GARMENT_AREA:
-                logger.debug(f"worn-outfit: dropping fragment '{label}' area={area:.4f} < {_MIN_GARMENT_AREA}")
+            min_area = _min_area_for_label(str(label))
+            if area < min_area:
+                logger.debug(f"worn-outfit: dropping fragment '{label}' area={area:.4f} < {min_area}")
                 continue
             raw.append(
                 Detection(

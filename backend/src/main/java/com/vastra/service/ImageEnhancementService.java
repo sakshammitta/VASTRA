@@ -17,7 +17,6 @@ import org.springframework.web.client.RestClient;
 
 import java.net.URI;
 import java.util.*;
-import java.util.Locale;
 
 /**
  * Produces clean e-commerce-quality wardrobe images via two strategies:
@@ -684,6 +683,20 @@ public class ImageEnhancementService {
     }
 
     /**
+     * True when the item is open-front outerwear whose crop likely shows a second
+     * garment underneath, so the AI render must be told to reconstruct only the
+     * outer layer.
+     */
+    private static boolean requiresOuterwearReconstruction(String category, String subCategory) {
+        String c = category == null ? "" : category.toLowerCase(Locale.ROOT);
+        String s = subCategory == null ? "" : subCategory.toLowerCase(Locale.ROOT);
+        if (c.contains("outerwear")) return true;
+        return s.contains("jacket") || s.contains("coat") || s.contains("blazer")
+            || s.contains("nehru") || s.contains("sherwani") || s.contains("cardigan")
+            || s.contains("overcoat") || s.contains("parka") || s.contains("trench");
+    }
+
+    /**
      * Embed a candidate product image via the CV service's /embed/url endpoint.
      * Returns the normalized FashionCLIP vector, or null when the CV service is
      * unreachable, FashionCLIP is not loaded, or the image can't be fetched —
@@ -860,14 +873,24 @@ public class ImageEnhancementService {
         String brandDesc = (brand != null && !brand.isBlank()) ? brand + " " : "";
         String garment   = (subCategory == null || subCategory.isBlank())
             ? category.toLowerCase() : subCategory;
+        // For outerwear the reference crop is often an OPEN jacket worn over a
+        // t-shirt, so the crop shows two garments. Tell the model to reconstruct
+        // only the outer layer, otherwise it renders the wrong garment entirely.
+        boolean isOuterwear = requiresOuterwearReconstruction(category, subCategory);
+        String outerwearClause = isOuterwear
+            ? " The reference shows this jacket/outerwear worn open over another garment; " +
+              "reconstruct ONLY the outer " + garment + " itself — its sleeves, collar/lapels, " +
+              "front opening and any zipper or buttons — and ignore any t-shirt, top or garment " +
+              "visible underneath. Show the " + garment + " closed/flat as a standalone product."
+            : "";
         String prompt = String.format(
             "Turn this into a realistic fashion e-commerce product photograph of the same " +
             "%s%s%s shown in the reference image. Keep the exact color, type, silhouette and " +
-            "any visible logo or graphic faithful to the reference. Present the garment upright, " +
+            "any visible logo or graphic faithful to the reference.%s Present the garment upright, " +
             "centered, isolated on a clean opaque neutral background. Remove any person, body " +
             "parts, hands, arms, phone, and background scene. Professional product shot, " +
             "Zara / H&M / ASOS online store style. High quality.",
-            brandDesc, garment, colorDesc);
+            brandDesc, garment, colorDesc, outerwearClause);
 
         try {
             byte[] cropBytes = restClient.get()
