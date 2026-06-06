@@ -134,7 +134,14 @@ public class ImageEnhancementService {
         COLOR_RANGES.put("pink",   new int[][]{{200,255},{100,200},{150,255}});
         COLOR_RANGES.put("purple", new int[][]{{80,180},{0,80},{130,220}});
         COLOR_RANGES.put("brown",  new int[][]{{100,180},{50,110},{0,70}});
+        COLOR_RANGES.put("tan",    new int[][]{{170,220},{130,180},{80,140}});
         COLOR_RANGES.put("beige",  new int[][]{{180,240},{160,220},{120,190}});
+        COLOR_RANGES.put("camel",  new int[][]{{180,230},{140,190},{80,140}});
+        COLOR_RANGES.put("olive",  new int[][]{{80,140},{100,160},{0,80}});
+        COLOR_RANGES.put("khaki",  new int[][]{{150,210},{150,200},{80,150}});
+        COLOR_RANGES.put("teal",   new int[][]{{0,80},{130,200},{140,220}});
+        COLOR_RANGES.put("burgundy", new int[][]{{100,180},{0,50},{0,60}});
+        COLOR_RANGES.put("maroon",   new int[][]{{100,180},{0,50},{0,60}});
     }
 
     private static final int MIN_DIMENSION_PX = 150;
@@ -210,7 +217,7 @@ public class ImageEnhancementService {
                     String siteName = p.path("source").asText("");
                     if (!imageUrl.isBlank() && !sourceUrl.isBlank()) {
                         int score = scoreCandidate(sourceUrl, title, subLower, brandTokens,
-                                p.path("original_dimensions"), true);
+                                p.path("original_dimensions"), true, detectedColorNames);
                         if (score > Integer.MIN_VALUE) {
                             String warn = combinedWarning(title, detectedColorNames);
                             if (warn != null) score -= 200;  // demote below clean candidates
@@ -231,7 +238,7 @@ public class ImageEnhancementService {
                     String siteName = m.path("source").asText("");
                     if (!imageUrl.isBlank() && !sourceUrl.isBlank()) {
                         int score = scoreCandidate(sourceUrl, title, subLower, brandTokens,
-                                m.path("original_dimensions"), false);
+                                m.path("original_dimensions"), false, detectedColorNames);
                         if (score > Integer.MIN_VALUE) {
                             String warn = combinedWarning(title, detectedColorNames);
                             if (warn != null) score -= 200;  // demote below clean candidates
@@ -298,7 +305,8 @@ public class ImageEnhancementService {
      */
     private int scoreCandidate(String sourceUrl, String title,
                                String subLower, List<String> brandTokens,
-                               JsonNode dims, boolean fromProductsArray) {
+                               JsonNode dims, boolean fromProductsArray,
+                               List<String> detectedColorNames) {
         String host = rootDomain(sourceUrl);
 
         if (isBlocked(host)) {
@@ -325,10 +333,19 @@ public class ImageEnhancementService {
             return Integer.MIN_VALUE;
         }
 
-        // Type conflict: if the title clearly indicates a different garment type,
-        // hard-reject (saves the user from seeing a zip-up hoodie when item is a plain hoodie).
+        // Type conflict: title clearly indicates a different garment type → hard-reject.
         if (!subLower.isBlank() && titleConflictsWithSubtype(title.toLowerCase(), subLower)) {
             log.debug("web-match: type conflict for subtype='{}' title='{}' — rejected", subLower, title);
+            return Integer.MIN_VALUE;
+        }
+
+        // Hard color reject: title names a color that is completely absent from the
+        // detected palette. Prevents a "Blue Jacket" from appearing for a tan/brown jacket.
+        // Only fires when we have palette data (never blocks items with no palette).
+        if (!detectedColorNames.isEmpty()
+                && titleColorConflictsHard(title.toLowerCase(), detectedColorNames)) {
+            log.debug("web-match: hard color conflict for palette={} title='{}' — rejected",
+                    detectedColorNames, title);
             return Integer.MIN_VALUE;
         }
 
@@ -347,25 +364,127 @@ public class ImageEnhancementService {
      * subtype — e.g. "zip-up" or "full-zip" for a plain "hoodie", or "tracksuit"
      * for a "sweatshirt". Prevents wrong-type candidates appearing in results.
      */
+    /**
+     * Returns true when the title contains terms that contradict the confirmed
+     * subtype. This is a hard-reject: the candidate will never be shown even if
+     * the domain score is high. Keeps the user from seeing a vest when they
+     * confirmed "jacket", or a blue jacket for a brown jacket.
+     *
+     * Rule additions vs the original:
+     *   - jacket: reject vest/gilet/bodywarmer/windbreaker/fleece/tracksuit/hoodie/sweatshirt
+     *   - coat:   reject puffer that isn't a coat, jacket, hoodie, sweatshirt
+     *   - vest:   reject jacket/coat/hoodie
+     *   - trousers/chinos: reject shorts/skirt/jogger/sweatpant
+     *   - shorts:  reject trousers/joggers
+     *   - blazer:  reject hoodie/sweatshirt/tracksuit
+     *   - sneakers/shoes: reject slippers/socks
+     */
     private boolean titleConflictsWithSubtype(String titleLower, String subLower) {
-        // For hoodie: reject titles with "zip" unless subtype itself is zip-up hoodie
-        if ("hoodie".equals(subLower)) {
-            if (titleLower.contains("full-zip") || titleLower.contains("half-zip")
-                || (titleLower.contains("zip") && !titleLower.contains("hoodie"))) return true;
-            if (titleLower.contains("tracksuit") || titleLower.contains("track suit")) return true;
-        }
-        // For sweatshirt/crewneck: reject hooded and zip-up mentions
-        if ("sweatshirt".equals(subLower) || "crewneck".equals(subLower)) {
-            if (titleLower.contains("hooded") || titleLower.contains("hoodie")) return true;
-            if (titleLower.contains("zip-up") || titleLower.contains("full-zip")) return true;
-        }
-        // For sweater/jumper: reject sweatshirt and hoodie
-        if ("sweater".equals(subLower)) {
-            if (titleLower.contains("sweatshirt") || titleLower.contains("hoodie")) return true;
-        }
-        // For plain "jacket": reject "track jacket" confusion with sweater/hoodie
-        if ("jacket".equals(subLower)) {
-            if (titleLower.contains("hoodie") || titleLower.contains("sweatshirt")) return true;
+        switch (subLower) {
+
+            case "jacket": {
+                // Must look like outerwear, not knitwear/trackwear/vests
+                if (titleLower.contains("vest") || titleLower.contains("gilet")
+                        || titleLower.contains("bodywarmer") || titleLower.contains("body warmer")
+                        || titleLower.contains("fleece") && !titleLower.contains("fleece jacket")
+                        || titleLower.contains("tracksuit") || titleLower.contains("track suit")
+                        || titleLower.contains("hoodie") || titleLower.contains("sweatshirt")
+                        || titleLower.contains("sweater") || titleLower.contains("jumper")
+                        || titleLower.contains("knitwear") || titleLower.contains("knit")
+                        || titleLower.contains("cardigan")
+                        ) return true;
+                break;
+            }
+
+            case "coat": {
+                if (titleLower.contains("jacket") && !titleLower.contains("coat")
+                        || titleLower.contains("hoodie") || titleLower.contains("sweatshirt")
+                        || titleLower.contains("vest") || titleLower.contains("gilet")
+                        ) return true;
+                break;
+            }
+
+            case "blazer": {
+                if (titleLower.contains("hoodie") || titleLower.contains("sweatshirt")
+                        || titleLower.contains("tracksuit") || titleLower.contains("track suit")
+                        || titleLower.contains("vest") || titleLower.contains("jersey")
+                        ) return true;
+                break;
+            }
+
+            case "vest": {
+                // A vest candidate must not be a full jacket or coat
+                if (titleLower.contains("jacket") || titleLower.contains("coat")
+                        || titleLower.contains("hoodie") || titleLower.contains("sweatshirt")
+                        ) return true;
+                break;
+            }
+
+            case "hoodie": {
+                if (titleLower.contains("full-zip") || titleLower.contains("half-zip")
+                        || (titleLower.contains("zip") && !titleLower.contains("hoodie"))) return true;
+                if (titleLower.contains("tracksuit") || titleLower.contains("track suit")) return true;
+                if (titleLower.contains("jacket") && !titleLower.contains("hoodie")) return true;
+                break;
+            }
+
+            case "zip-up hoodie": {
+                if (titleLower.contains("sweatshirt") && !titleLower.contains("zip")) return true;
+                if (titleLower.contains("jacket") && !titleLower.contains("hoodie")) return true;
+                break;
+            }
+
+            case "sweatshirt":
+            case "crewneck": {
+                if (titleLower.contains("hooded") || titleLower.contains("hoodie")) return true;
+                if (titleLower.contains("zip-up") || titleLower.contains("full-zip")) return true;
+                if (titleLower.contains("jacket") && !titleLower.contains("sweatshirt")) return true;
+                break;
+            }
+
+            case "sweater": {
+                if (titleLower.contains("sweatshirt") || titleLower.contains("hoodie")) return true;
+                if (titleLower.contains("jacket") && !titleLower.contains("sweater")) return true;
+                break;
+            }
+
+            case "trousers":
+            case "chinos": {
+                if (titleLower.contains("shorts") || titleLower.contains("skirt")
+                        || titleLower.contains("jogger") || titleLower.contains("sweatpant")
+                        || titleLower.contains("legging")) return true;
+                break;
+            }
+
+            case "shorts": {
+                if (titleLower.contains("trouser") || titleLower.contains("chino")
+                        || titleLower.contains("jogger") || titleLower.contains("sweatpant")
+                        || titleLower.contains("legging")) return true;
+                break;
+            }
+
+            case "joggers":
+            case "sweatpants": {
+                if (titleLower.contains("jean") || titleLower.contains("trouser")
+                        || titleLower.contains("chino") || titleLower.contains("shorts")
+                        || titleLower.contains("legging")) return true;
+                break;
+            }
+
+            case "sneakers":
+            case "running shoes": {
+                if (titleLower.contains("slipper") || titleLower.contains("sandal")
+                        || titleLower.contains("heel") || titleLower.contains("boot")
+                        || titleLower.contains("loafer") || titleLower.contains("sock")) return true;
+                break;
+            }
+
+            case "boots": {
+                if (titleLower.contains("sneaker") || titleLower.contains("trainer")
+                        || titleLower.contains("slipper") || titleLower.contains("sandal")
+                        || titleLower.contains("loafer")) return true;
+                break;
+            }
         }
         return false;
     }
@@ -376,6 +495,35 @@ public class ImageEnhancementService {
      *   1. Back/partial view in the title — not useful as a wardrobe front image.
      *   2. Title names a color that conflicts with the detected palette.
      */
+    /**
+     * Hard color reject: returns true when the title explicitly names a specific
+     * color that is entirely absent from the detected palette AND is not adjacent
+     * to any detected color (e.g. navy ≈ blue). Prevents blue jackets from
+     * appearing for a tan/brown item, and avoids drowning good results in demotion
+     * score math when the conflict is clear-cut.
+     *
+     * Only fires for colors that appear verbatim in the title (not inferred).
+     * Does NOT fire when the detected palette is empty (no data → no hard reject).
+     *
+     * Colors excluded from hard-reject: "white", "black", "grey"/"gray" — these
+     * appear in product titles as accent/contrast elements even for multi-color
+     * items (e.g. "Black/Brown Bomber Jacket"), so we soft-warn instead.
+     */
+    private boolean titleColorConflictsHard(String titleLower, List<String> detectedColorNames) {
+        // Hard-reject colors: primary/saturated hues only; neutrals handled by soft warn.
+        Set<String> hardColors = Set.of("blue", "red", "green", "yellow", "orange",
+                "purple", "pink", "navy", "teal", "burgundy", "maroon", "olive",
+                "brown", "tan", "beige", "cream", "khaki", "camel");
+        for (String color : hardColors) {
+            if (!titleLower.contains(color)) continue;
+            // Check that the detected palette has this color or an adjacent one.
+            boolean present = detectedColorNames.stream()
+                    .anyMatch(d -> d.equals(color) || relatedColors(d, color));
+            if (!present) return true;
+        }
+        return false;
+    }
+
     private String combinedWarning(String title, List<String> detectedColorNames) {
         String backWarn = backOrPartialViewWarning(title);
         if (backWarn != null) return backWarn;
@@ -466,18 +614,40 @@ public class ImageEnhancementService {
 
     /** Some colors are close enough that a mismatch warning is unnecessary. */
     private boolean relatedColors(String a, String b) {
-        return (("grey".equals(a) || "gray".equals(a)) && ("grey".equals(b) || "gray".equals(b)))
-            || (("navy".equals(a) && "blue".equals(b)) || ("blue".equals(a) && "navy".equals(b)));
+        if (a.equals(b)) return true;
+        // Grey/gray are the same word spelled differently.
+        if (isGrey(a) && isGrey(b)) return true;
+        // Navy and blue are close enough that a navy product is acceptable for a blue item.
+        if ((isNavy(a) && isBlue(b)) || (isBlue(a) && isNavy(b))) return true;
+        // Earth tones: tan, brown, beige, camel, khaki, cream are interchangeable enough
+        // that a "beige" title is not a hard-conflict for a "tan" detected item.
+        if (isEarthTone(a) && isEarthTone(b)) return true;
+        // Olive and khaki overlap in practice.
+        if (isOliveKhaki(a) && isOliveKhaki(b)) return true;
+        return false;
     }
 
-    /** Build a short text hint for the SerpAPI `q` parameter. */
+    private static boolean isGrey(String c)        { return "grey".equals(c) || "gray".equals(c); }
+    private static boolean isNavy(String c)        { return "navy".equals(c); }
+    private static boolean isBlue(String c)        { return "blue".equals(c); }
+    private static boolean isEarthTone(String c)   {
+        return Set.of("tan", "brown", "beige", "camel", "cream", "khaki", "sand").contains(c);
+    }
+    private static boolean isOliveKhaki(String c)  { return "olive".equals(c) || "khaki".equals(c); }
+
+    /**
+     * Build a short text hint for the SerpAPI `q` parameter.
+     * The hint steers Google Lens ranking; it is NOT a filter (filtering is our job).
+     * Include up to two dominant colors so the Lens shopping API returns
+     * color-relevant products ahead of generic catalog images.
+     */
     private String buildTextHint(String subCategory, String brand, List<String> colorPalette) {
         List<String> parts = new ArrayList<>();
         if (brand != null && !brand.isBlank()) parts.add(brand.trim());
         if (subCategory != null && !subCategory.isBlank()) parts.add(subCategory.trim());
-        // Add the dominant color name if clearly identifiable.
         List<String> colorNames = colorNamesFromPalette(colorPalette);
-        if (!colorNames.isEmpty()) parts.add(colorNames.get(0));
+        // Include up to 2 detected colors so Lens ranks color-matched products higher.
+        colorNames.stream().limit(2).forEach(parts::add);
         return String.join(" ", parts);
     }
 

@@ -101,7 +101,7 @@ def _embed_detections(image, detections: list) -> list[DetectedItem]:
     for detection in detections:
         try:
             t0 = time.perf_counter()
-            crop = segmenter.segment_crop(image, detection.bbox)
+            crop = segmenter.segment_crop(image, detection.bbox, detection_label=detection.label)
             logger.info(f"timing segment-crop: {(time.perf_counter() - t0)*1000:.0f}ms")
 
             colors = embedder.extract_colors(crop, k=3)
