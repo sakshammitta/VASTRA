@@ -122,15 +122,28 @@ public class WardrobeController {
                                      (String) detected.getOrDefault("sub_category", ""));
         String brand      = req != null ? req.brand() : null;
         List<String> colors = (List<String>) detected.getOrDefault("color_palette", List.of());
+        // Reference embedding for visual-similarity validation (null → gate skipped).
+        float[] refEmbedding = toEmbeddingArray(detected.get("embedding"));
 
         List<ClothingItemDto.WebMatchCandidate> candidates =
-            imageEnhancementService.searchWebMatches(cropUrl, category, subCat, colors, brand);
+            imageEnhancementService.searchWebMatches(cropUrl, category, subCat, colors, brand, refEmbedding);
 
         return ResponseEntity.ok(new ClothingItemDto.WebMatchResponse(candidates, true));
     }
 
     private static String override(String corrected, String fallback) {
         return (corrected != null && !corrected.isBlank()) ? corrected : fallback;
+    }
+
+    /** Convert a raw scan-job embedding (List<Number> from Redis JSON) to float[], or null. */
+    private static float[] toEmbeddingArray(Object raw) {
+        if (!(raw instanceof List<?> list) || list.isEmpty()) return null;
+        float[] out = new float[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i) instanceof Number n) out[i] = n.floatValue();
+            else return null;
+        }
+        return out;
     }
 
     /**

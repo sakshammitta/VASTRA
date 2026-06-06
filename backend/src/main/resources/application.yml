@@ -73,6 +73,13 @@ vastra:
   cv-service:
     base-url: ${CV_SERVICE_URL:http://localhost:8001}
 
+  webmatch:
+    # Minimum cosine similarity (0-1) between a candidate product image embedding
+    # and the original item-crop embedding for a candidate to be shown. Below this,
+    # the candidate is the right type/color but visually a different garment, so we
+    # hide it and recommend an AI clean render instead. Tune per FashionCLIP behavior.
+    visual-similarity-threshold: ${WEBMATCH_VISUAL_SIMILARITY_THRESHOLD:0.75}
+
   serpapi:
     api-key: ${SERPAPI_KEY:}
 

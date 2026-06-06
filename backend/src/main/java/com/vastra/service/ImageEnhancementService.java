@@ -157,6 +157,12 @@ public class ImageEnhancementService {
     @Value("${vastra.openai.image-model:gpt-image-2}")
     private String openAiImageModel;
 
+    @Value("${vastra.cv-service.base-url:http://localhost:8001}")
+    private String cvServiceUrl;
+
+    @Value("${vastra.webmatch.visual-similarity-threshold:0.75}")
+    private double visualSimilarityThreshold;
+
     private final RestClient restClient = RestClient.create();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final R2Service r2Service;
@@ -182,6 +188,21 @@ public class ImageEnhancementService {
     public List<WebMatchCandidate> searchWebMatches(
             String cropPresignedUrl, String category, String subCategory,
             List<String> colorPalette, String brand) {
+        return searchWebMatches(cropPresignedUrl, category, subCategory, colorPalette, brand, null);
+    }
+
+    /**
+     * As above, with an optional {@code referenceEmbedding} (the original item
+     * crop's FashionCLIP vector). When provided, each surviving candidate's
+     * product image is embedded via the CV service and compared by cosine
+     * similarity; candidates below {@code visualSimilarityThreshold} are dropped
+     * because they are the same type/color but a visually different garment.
+     * When the reference embedding is null (FashionCLIP was unavailable at scan
+     * time), visual validation is skipped — we never fabricate a similarity.
+     */
+    public List<WebMatchCandidate> searchWebMatches(
+            String cropPresignedUrl, String category, String subCategory,
+            List<String> colorPalette, String brand, float[] referenceEmbedding) {
 
         if (serpApiKey.isBlank()) return List.of();
 
@@ -255,6 +276,9 @@ public class ImageEnhancementService {
                 .<ScoredCandidate, Boolean>comparing(c -> c.colorWarning() != null)
                 .thenComparingInt(ScoredCandidate::score).reversed());
 
+            boolean visualGateActive = referenceEmbedding != null && referenceEmbedding.length > 0;
+            int visualRejects = 0;
+
             List<WebMatchCandidate> results = new ArrayList<>();
             Set<String> seenDomains = new HashSet<>();
             for (ScoredCandidate sc : pool) {
@@ -262,6 +286,28 @@ public class ImageEnhancementService {
                 if (sc.score() < WARDROBE_QUALITY_THRESHOLD) break;
                 String domain = rootDomain(sc.sourceUrl());
                 if (!seenDomains.add(domain)) continue;
+
+                // ── Visual similarity gate ────────────────────────────────────
+                // Same type + same color is not enough: the silhouette/details must
+                // match. Embed the candidate product image via the CV service and
+                // compare to the original crop embedding. Drop candidates that are
+                // a visually different garment (random black jacket vs MY jacket).
+                if (visualGateActive) {
+                    float[] candEmb = embedImageUrl(sc.imageUrl());
+                    if (candEmb != null) {
+                        double sim = cosineSimilarity(referenceEmbedding, candEmb);
+                        if (sim < visualSimilarityThreshold) {
+                            visualRejects++;
+                            log.debug("web-match: visual reject sim={} < {} title='{}'",
+                                    String.format("%.3f", sim), visualSimilarityThreshold, sc.title());
+                            continue;
+                        }
+                        log.debug("web-match: visual pass sim={} title='{}'",
+                                String.format("%.3f", sim), sc.title());
+                    }
+                    // candEmb == null → CV couldn't embed it; fall through (don't fabricate).
+                }
+
                 // Strengthen the color check on the shortlist by inspecting the actual
                 // thumbnail pixels (title words alone miss logo/base-color swaps).
                 String warning = sc.colorWarning();
@@ -277,13 +323,13 @@ public class ImageEnhancementService {
             results.sort(Comparator.comparing(c -> c.colorWarning() != null));
 
             if (results.isEmpty()) {
-                log.info("web-match: no wardrobe-quality candidates for {}/{} (pool={}, textHint='{}' — suggest AI render)",
-                        category, subCategory, pool.size(), textHint);
+                log.info("web-match: no candidates passed for {}/{} (pool={}, visualGate={}, visualRejects={}, textHint='{}' — suggest AI render)",
+                        category, subCategory, pool.size(), visualGateActive, visualRejects, textHint);
                 return List.of();
             }
 
-            log.info("web-match: {} candidates for {}/{} (pool={}, textHint='{}')",
-                    results.size(), category, subCategory, pool.size(), textHint);
+            log.info("web-match: {} candidates for {}/{} (pool={}, visualGate={}, visualRejects={}, textHint='{}')",
+                    results.size(), category, subCategory, pool.size(), visualGateActive, visualRejects, textHint);
             return results;
 
         } catch (Exception e) {
@@ -610,6 +656,47 @@ public class ImageEnhancementService {
             log.debug("web-match: thumbnail color check skipped ({})", e.getMessage());
         }
         return null;
+    }
+
+    /**
+     * Embed a candidate product image via the CV service's /embed/url endpoint.
+     * Returns the normalized FashionCLIP vector, or null when the CV service is
+     * unreachable, FashionCLIP is not loaded, or the image can't be fetched —
+     * in which case visual validation is skipped for that candidate.
+     */
+    private float[] embedImageUrl(String imageUrl) {
+        try {
+            String reqBody = objectMapper.writeValueAsString(Map.of("image_url", imageUrl));
+            String body = restClient.post()
+                .uri(cvServiceUrl + "/embed/url")
+                .header("Content-Type", "application/json")
+                .body(reqBody)
+                .retrieve()
+                .body(String.class);
+            JsonNode root = objectMapper.readTree(body);
+            JsonNode emb = root.path("embedding");
+            if (!emb.isArray() || emb.isEmpty()) return null;
+            float[] vec = new float[emb.size()];
+            for (int i = 0; i < emb.size(); i++) vec[i] = (float) emb.get(i).asDouble();
+            return vec;
+        } catch (Exception e) {
+            log.debug("web-match: candidate embed failed ({}) — skipping visual gate for {}",
+                    e.getMessage(), imageUrl);
+            return null;
+        }
+    }
+
+    /** Cosine similarity between two equal-length vectors; 0 when shapes differ or norm is 0. */
+    private static double cosineSimilarity(float[] a, float[] b) {
+        if (a == null || b == null || a.length != b.length || a.length == 0) return 0.0;
+        double dot = 0, na = 0, nb = 0;
+        for (int i = 0; i < a.length; i++) {
+            dot += (double) a[i] * b[i];
+            na  += (double) a[i] * a[i];
+            nb  += (double) b[i] * b[i];
+        }
+        if (na == 0 || nb == 0) return 0.0;
+        return dot / (Math.sqrt(na) * Math.sqrt(nb));
     }
 
     /** Some colors are close enough that a mismatch warning is unnecessary. */

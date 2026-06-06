@@ -204,6 +204,39 @@ public class WardrobeService {
         return raw.toString();
     }
 
+    /** Parse a pgvector text embedding "[v1,v2,...]" into a float[], or null when blank/invalid. */
+    private static float[] parseEmbedding(String vec) {
+        if (vec == null || vec.isBlank()) return null;
+        String s = vec.trim();
+        if (s.startsWith("[")) s = s.substring(1);
+        if (s.endsWith("]"))   s = s.substring(0, s.length() - 1);
+        if (s.isBlank()) return null;
+        try {
+            String[] parts = s.split(",");
+            float[] out = new float[parts.length];
+            for (int i = 0; i < parts.length; i++) out[i] = Float.parseFloat(parts[i].trim());
+            return out;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** Convert a raw embedding (List<Number> from Redis JSON, or pgvector String) to float[]. */
+    private static float[] toEmbeddingArray(Object raw) {
+        if (raw == null) return null;
+        if (raw instanceof String s) return parseEmbedding(s);
+        if (raw instanceof List<?> list) {
+            float[] out = new float[list.size()];
+            for (int i = 0; i < list.size(); i++) {
+                Object v = list.get(i);
+                if (v instanceof Number n) out[i] = n.floatValue();
+                else return null;
+            }
+            return out;
+        }
+        return null;
+    }
+
     /**
      * Map a CV category string to the ClothingCategory enum.
      * The CV service stores the uppercase enum name directly ("TOP", "BOTTOM", etc.),
@@ -272,9 +305,13 @@ public class WardrobeService {
                 item.getCategory() != null ? item.getCategory().name() : "OTHER");
         String subCat   = override(req != null ? req.subCategory() : null, item.getSubCategory());
         String brand    = (req != null && req.brand() != null) ? req.brand() : item.getBrand();
+        // Reference embedding for visual-similarity validation (null when FashionCLIP
+        // was unavailable at scan time → visual gate is skipped, never fabricated).
+        float[] refEmbedding = parseEmbedding(item.getFashionClipEmbedding());
         var candidates  = imageEnhancementService.searchWebMatches(
                 cropUrl, category, subCat,
-                item.getColorPalette() != null ? item.getColorPalette() : List.of(), brand);
+                item.getColorPalette() != null ? item.getColorPalette() : List.of(), brand,
+                refEmbedding);
         return new ClothingItemDto.WebMatchResponse(candidates, true);
     }
 

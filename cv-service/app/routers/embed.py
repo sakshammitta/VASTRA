@@ -166,3 +166,54 @@ async def embed_detections(request: EmbedRequest):
     items = _embed_detections(image, request.detections)
     logger.info(f"timing embed-total: {(time.perf_counter() - t0_total)*1000:.0f}ms  items={len(items)}")
     return EmbedResponse(items=items)
+
+
+class EmbedUrlRequest(BaseModel):
+    image_url: str
+
+
+class EmbedUrlResponse(BaseModel):
+    # Normalized FashionCLIP embedding for the downloaded image, or null when
+    # the model is not loaded or the image could not be fetched/decoded. The
+    # caller treats null as "cannot validate visually" (does NOT fabricate a match).
+    embedding: list[float] | None = None
+
+
+@router.post("/url", response_model=EmbedUrlResponse)
+def embed_url(request: EmbedUrlRequest):
+    """
+    Download an arbitrary image URL (e.g. a web-match candidate product thumbnail)
+    and return its FashionCLIP embedding. Used by the backend to validate that a
+    web-match candidate is visually similar to the user's original item crop —
+    same type + same color is not enough; the silhouette/details must match too.
+
+    Returns embedding=null (HTTP 200) when FashionCLIP is unavailable or the image
+    cannot be fetched/decoded. The backend then skips visual validation for that
+    candidate rather than guessing.
+    """
+    import io
+    import urllib.request
+    from PIL import Image as PilImage
+
+    if not embedder.is_loaded():
+        logger.info("/embed/url: FashionCLIP not loaded — returning null embedding")
+        return EmbedUrlResponse(embedding=None)
+
+    try:
+        t0 = time.perf_counter()
+        req = urllib.request.Request(
+            request.image_url,
+            headers={"User-Agent": "Mozilla/5.0 (VASTRA web-match validator)"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            raw = resp.read()
+        image = PilImage.open(io.BytesIO(raw)).convert("RGB")
+        embedding = embedder.get_embedding(image)
+        logger.info(
+            f"timing embed-url: {(time.perf_counter() - t0)*1000:.0f}ms  "
+            f"bytes={len(raw)} present={embedding is not None}"
+        )
+        return EmbedUrlResponse(embedding=embedding)
+    except Exception as e:
+        logger.warning(f"/embed/url failed for {request.image_url}: {e}")
+        return EmbedUrlResponse(embedding=None)
